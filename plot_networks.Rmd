@@ -1,0 +1,242 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# library
+
+```{r}
+library(tidyverse)
+library(PCSF)
+source("R/helper.R")
+source("R/kinograte_PG.R")
+
+load("data/ppi_network/ppi_network_human_v12.rda")
+# ppi_networkv12_kin <- load("data/ppi_networkv12_kin.rda")
+
+rpws <- read_delim("data/ReactomePathways.txt", col_names = c('pathway_id', 'pathway_name', "organism")) %>% filter(organism == "Homo sapiens")
+
+rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent", "child"))
+```
+
+
+# UKA input
+
+```{r}
+
+input_folder <- "uka/190143Dublin"
+input_folder <- "uka/190136UCLUK"
+
+uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows()
+
+uka_syms <- rlang::syms(c("uka")) 
+
+
+```
+
+
+
+# Run kinase
+
+```{r}
+source("R/helper_only_kinase_paralell.R")
+source("R/kinograte_PG_only_kinase.R")
+source("R/network_enrichment_and_vis.R")
+
+
+result_path <- paste0("results/", input_folder)
+
+if (!file.exists(result_path)) {
+  dir.create(result_path)
+}
+
+params <- list(
+  fscore_cutoff = 0.7, # sensitivity score
+  respath = result_path,
+  perc_cutoffs = c(0.01), # c(0.9, 0.7, 0.5, 0.3)
+  rank_uka_abs = T,
+  b = 2,
+  cs = T,
+  highlight_degree = 5,
+  art_nodes = c("BTK"),
+  art_lfc = -1
+)
+
+for (uka_sym in uka_syms) {
+  params_run <- capture_params(
+    !!!params,
+    uka = !!uka_sym,
+    ppi_network = !!rlang::sym('ppi_networkv12')
+  )
+  
+  do.call(plot_cell_networks_kinase, params_run)
+}
+
+```
+
+
+
+
+
+
+
+
+
+# THIS DOES NOT YET WORK! #
+
+# Run kinase + sensitivity
+
+```{r}
+source("R/helper.R")
+source("R/kinograte_PG.R")
+source("R/network_enrichment_and_vis.R")
+
+sens_med <- read_csv("data/Sensitivity/sensitivity_median_stk_cells.csv")
+
+result_path <- "results/Network"
+
+if (!file.exists(result_path)) {
+  dir.create(result_path)
+}
+
+params <- list(
+  fscore_cutoff = 1,
+  control = "RL",
+  respath = result_path,
+  perc_cutoffs = c(0.7), # c(0.9, 0.7, 0.5, 0.3)
+  rank_uka_abs = T,
+  b = 2,
+  cs = F,
+  wp_ontology_names = c("classic metabolic pathway", "signaling pathway", "regulatory pathway"),
+  highlight_degree = 5
+)
+
+
+
+for (uka_sym in uka_syms) {
+  params_run <- capture_params(
+    !!!params,
+    uka = !!uka_sym,
+    sens = !!rlang::sym("sens_med"),
+    ppi_network = !!rlang::sym('ppi_networkv12')
+  )
+  
+  do.call(plot_cell_networks, params_run)
+}
+
+
+```
+
+# Make network of 1 pw
+
+```{r}
+source("R/kinograte_PG.R")
+source("R/kinograte_PG_core.R")
+source("R/network_enrichment_and_vis.R")
+
+db <- read_csv("data/250727_86312_86402_86412_87102_87202_UpstreamDb_to_share.csv")
+slk <- read_csv("data/Signalink_Protein_to_Pathway.csv")
+
+wnt_kin <- slk_kin_pw1 %>% filter(str_detect(pathways, "WNT"))
+write_csv(wnt_kin, "results/Network/Signalink_WNT_pathway_kinases_in_UKAdb.csv")
+wnt <- slk %>% filter(str_detect(pathways, "WNT"))
+
+
+
+db_wnt <- db %>% filter(Kinase_Name %in% wnt$name)
+write_csv(db_wnt, "results/Network/ukadb_SignaLink_WNT_kinases.csv")
+
+make_ukadb_net_pws(ukadb = db_wnt, ppi_network = ppi_networkv12, slk = slk, res.path = "results/Network/ukadb_wnt")
+
+
+```
+
+# Generate a small network from uka kinases input
+
+Using all kinases from ukadb as input, network is created. Then, from the nodes of this network an augmented network is created by filtering for interaction cost and including 1 or 2 more steps.
+
+```{r}
+
+load("data/PamGene/250727_86312_86402_86412_87102_87202_UpstreamDb.Rdata")
+load("data/ppi_network/ppi_network_human_v12.rda")
+full_net <- graph_from_data_frame(
+  d = ppi_networkv12,          # Your dataframe of edges
+  directed = FALSE,          # Usually PPI networks are undirected
+  vertices = NULL            # Use NULL unless you have a separate node list
+)
+
+
+kins_to_kinograte <- UpstreamDatabase %>% ungroup() %>% distinct(Kinase_Name) %>%
+  dplyr::rename(name = Kinase_Name) %>%
+  mutate(LogFC = 1, type = "Kinase", prize = 10)
+
+sumdf <- kins_to_kinograte %>% group_by(type) %>% summarize(n_nodes = n())
+print(sumdf) 
+
+
+# 2. Make network
+kinograte_res <- kinograte_pg(df = kins_to_kinograte, ppi_network = ppi_networkv12, 
+                              perc_cutoff = 0,
+                              res.path = "data", condition = "uka",
+                              cluster = T)
+a = kinograte_res$nodes
+ppi_networkv12_502_kins <- ppi_networkv12 %>% filter(head %in% a$Protein | tail %in% a$Protein)
+save(ppi_networkv12_502_kins, file = "data/ppi_networkv12_kin.rda")
+
+missing <- read_csv("data/missing_nodes_uka_p0.csv")
+missing$name
+missing$name %in% ppi_networkv12$head | missing$name %in% ppi_networkv12$tail
+
+subnet1 <- augment_by_threshold_steps(kinograte_res$network, full_net, cost_threshold = 0.2, steps = 2)
+
+ppi_networkv12_kin_2step_cost0.2 <- igraph::as_data_frame(subnet1, what = "edges") %>%
+  dplyr::rename(head = from, tail = to)
+nodes_subnet <- igraph::as_data_frame(subnet1, what = "vertices")
+
+sum(unique(UpstreamDatabase$Kinase_Name) %in% nodes_subnet$name)
+setdiff(UpstreamDatabase$Kinase_Name, nodes_subnet$name)
+
+write_csv(ppi_networkv12_kin_2step_cost0.2, "data/ppi_networkv12_kin_2step_cost0.2.csv")
+save(ppi_networkv12_kin_2step_cost0.2, file = "data/ppi_networkv12_kin_2step_cost0.2.rda")
+
+
+subnet2 <- augment_by_threshold_steps(kinograte_res$network, full_net, cost_threshold = 0.5, steps = 1)
+
+ppi_networkv12_kin_1step_cost0.5 <- igraph::as_data_frame(subnet2, what = "edges") %>%
+  dplyr::rename(head = from, tail = to)
+nodes_subnet <- igraph::as_data_frame(subnet2, what = "vertices")
+
+sum(unique(UpstreamDatabase$Kinase_Name) %in% nodes_subnet$name)
+setdiff(UpstreamDatabase$Kinase_Name, nodes_subnet$name)
+
+write_csv(ppi_networkv12_kin_1step_cost0.5, "data/ppi_networkv12_kin_1step_cost0.5.csv")
+save(ppi_networkv12_kin_1step_cost0.5, file = "data/ppi_networkv12_kin_1step_cost0.5.rda")
+
+```
+
+
+
+# Download reactome
+
+```{r}
+# download.file(
+#   "https://reactome.org/download/current/ReactomePathways.txt",
+#   destfile = "data/ReactomePathways.txt",
+#   mode = "wb"
+# )
+# 
+# download.file(
+#   "https://reactome.org/download/current/ReactomePathwaysRelation.txt",
+#   destfile = "data/ReactomePathwaysRelation.txt",
+#   mode = "wb"
+# )
+
+
+```
+
+
+
+
+
+
+
