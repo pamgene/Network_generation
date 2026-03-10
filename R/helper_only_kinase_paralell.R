@@ -710,6 +710,12 @@ create_combined_heatmap <- function(heatmap_data_list, w_combined, h, save_folde
       # Get matrix subset for common pathways only
       comp_matrix <- heatmap_data_list[[comp_name]]$matrix
       comp_matrix_subset <- comp_matrix[rownames(comp_matrix) %in% common_pathways, , drop = FALSE]
+
+      comp_matrix_subset <- comp_matrix_subset[
+        !apply(comp_matrix_subset == 0, 1, all),
+        !apply(comp_matrix_subset == 0, 2, all),
+        drop = FALSE
+      ]
       
       # Ensure same pathway order across all comparisons
       comp_matrix_subset <- comp_matrix_subset[common_pathways, , drop = FALSE]
@@ -1047,7 +1053,7 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
         heatmap_matrix,
         name = "LogFC",
         col = col_fun,
-        cluster_rows = FALSE,  # Don't cluster pathways
+        cluster_rows = TRUE,  # cluster pathways
         cluster_columns = TRUE,  # Cluster kinases
         show_row_names = TRUE,
         show_column_names = TRUE,
@@ -1056,6 +1062,7 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
         row_names_gp = gpar(fontsize = 6),  # Smaller font for long pathway names
         column_names_gp = gpar(fontsize = 8),
         row_names_max_width = unit(8, "cm"),  # More space for row names
+        rect_gp = gpar(col = "black", lwd = 0.5),
         heatmap_legend_param = list(title = "LogFC", 
                                    title_gp = gpar(fontsize = 10),
                                    labels_gp = gpar(fontsize = 8))

@@ -29,6 +29,17 @@ input_folder <- "uka/190136UCLUK"
 
 uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows()
 
+from_vals = unique(uka$Sgroup_contrast)
+from_vals
+to_vals <- c("T1ATMi vs DMSO", "T2ATRi vs DMSO", "T3Combi vs DMSO") #c("Sensitive_T vs C", "Resistant_T vs C")
+from_vals
+to_vals
+
+uka <- uka %>% 
+  mutate(Sgroup_contrast = plyr::mapvalues(Sgroup_contrast, 
+                                           from = from_vals,
+                                           to = to_vals))
+
 uka_syms <- rlang::syms(c("uka")) 
 
 
@@ -47,7 +58,7 @@ library(ComplexHeatmap)
 library(circlize)
 
 
-result_path <- paste0("results2/",  sub(".*\\/", "", input_folder))
+result_path <- paste0("results3/",  sub(".*\\/", "", input_folder))
 
 if (!file.exists(result_path)) {
   dir.create(result_path, recursive = T)
@@ -59,10 +70,10 @@ params <- list(
   perc_cutoffs = c(0.01), # c(0.9, 0.7, 0.5, 0.3)
   rank_uka_abs = T,
   b = 2,
-  cs = T,
+  cs = F,
   highlight_degree = 5,
   art_nodes = NULL, # c("BTK")
-  art_lfc = -1
+  art_lfc = NULL
 )
 
 for (uka_sym in uka_syms) {
@@ -78,7 +89,8 @@ for (uka_sym in uka_syms) {
 
 
 
-plot_kinase_pathway_heatmaps(paste0(result_path, '/thrs_0.01_spec0.7_ppi_networkv12_nperms_ukaabs1_b2'))
+plot_kinase_pathway_heatmaps(paste0(result_path, '/190143Dublin_network'))
+plot_kinase_pathway_heatmaps(paste0(result_path, '/results_BTK_artificial'))
 
 ```
 
