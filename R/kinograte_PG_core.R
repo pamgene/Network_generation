@@ -5,7 +5,7 @@ library(httr)
 library(PCSF)
 
 
-extract_data_percentile <- function(data_list, res.path, perc_cutoff, fscore_cutoff, rank_lowest_highest = FALSE){
+extract_data_percentile <- function(data_list, res.path, perc_cutoff, spec_cutoff, rank_lowest_highest = FALSE){
   # data list includes a named list of dataframes, 
   # where names should be from the following: Kinase, Pep, MS, RNA
   # dataframe columns: uniprotname, LogFC + column for kinases: fscore 
@@ -25,7 +25,7 @@ extract_data_percentile <- function(data_list, res.path, perc_cutoff, fscore_cut
     }
     
     # extract top hits
-    data_top <- top_hits_pg(data_rank, perc_cutoff = perc_cutoff, fscore_cutoff = fscore_cutoff,
+    data_top <- top_hits_pg(data_rank, perc_cutoff = perc_cutoff, spec_cutoff = spec_cutoff,
                             omic_type = data_name)
     data_top_list[[data_name]] <- data_top
   }
@@ -50,14 +50,14 @@ extract_data_percentile <- function(data_list, res.path, perc_cutoff, fscore_cut
 
 
 
-top_hits_pg <- function(df, perc_cutoff, omic_type, fscore_cutoff){
+top_hits_pg <- function(df, perc_cutoff, omic_type, spec_cutoff){
   if (!omic_type == "Kinase"){
     df %>% dplyr::filter(score >= perc_cutoff) %>% dplyr::ungroup() %>% 
       dplyr::mutate(rank = 1:base::nrow(.), prize = score, 
                     type = omic_type) %>% 
       dplyr::select(name, prize, type, LogFC)
   } else {
-    df %>% dplyr::filter(fscore >= fscore_cutoff) %>% dplyr::ungroup() %>% 
+    df %>% dplyr::filter(fscore >= spec_cutoff) %>% dplyr::ungroup() %>% 
       dplyr::mutate(rank = 1:base::nrow(.), prize = score, 
                     type = omic_type) %>% 
       dplyr::select(name, prize, type, LogFC)
@@ -345,9 +345,11 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
     as.data.frame() %>% 
     dplyr::select(-any_of(c('title')))
   
+  nodes_to_write <- kinograte_nodes %>% select(-prize)
+  
   if (write) {
     readr::write_csv(
-      kinograte_nodes, 
+      nodes_to_write, 
       paste0(res.path, "/nodes_", condition, "_p", 
              sub(".*0\\.", "", perc_cutoff), ".csv")
     )
@@ -472,9 +474,15 @@ kinograte_pg <- function (df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b 
 
   kinograte_nodes <- nodes %>% as.data.frame() %>% 
     dplyr::select(-any_of(c('title')))
-  if (write){
-    write_csv(kinograte_nodes, 
-              paste0(res.path, "/nodes_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+  
+  nodes_to_write <- kinograte_nodes %>% select(-prize)
+  
+  if (write) {
+    readr::write_csv(
+      nodes_to_write, 
+      paste0(res.path, "/nodes_", condition, "_p", 
+             sub(".*0\\.", "", perc_cutoff), ".csv")
+    )
   }
   
 

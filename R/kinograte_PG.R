@@ -406,7 +406,7 @@ make_ukadb_net_pws <- function(ukadb, ppi_network, slk, res.path, b = 2, highlig
   
 }
 
-make_network_and_stats <- function(uka, sens, perc_cutoff, fscore_cutoff, res.path, condition = NULL, 
+make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path, condition = NULL, 
                                    write = F, ppi_network, relative_to, b,
                                    wp_ontology_names = NULL, highlight_degree = 5) {
   # Makes a network from kinase and sensitivity data.
@@ -442,7 +442,7 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, fscore_cutoff, res.pa
     
     # 4. Enrich network with pathways, then network with pathways
     if (write == T){
-      enrich_file <- paste0(res.path, "/enrich_results_per_pathway_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
+      enrich_file <- paste0(res.path, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
       if (!file.exists(enrich_file)) {
         pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
                             perc_cutoff = perc_cutoff, folder = res.path, condition = condition,

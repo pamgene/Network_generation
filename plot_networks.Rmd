@@ -41,24 +41,27 @@ uka_syms <- rlang::syms(c("uka"))
 ```{r}
 source("R/helper_only_kinase_paralell.R")
 source("R/kinograte_PG_only_kinase.R")
+source("R/kinograte_PG_core.R")
 source("R/network_enrichment_and_vis.R")
+library(ComplexHeatmap)
+library(circlize)
 
 
-result_path <- paste0("results/", input_folder)
+result_path <- paste0("results2/",  sub(".*\\/", "", input_folder))
 
 if (!file.exists(result_path)) {
-  dir.create(result_path)
+  dir.create(result_path, recursive = T)
 }
 
 params <- list(
-  fscore_cutoff = 0.7, # sensitivity score
+  spec_cutoff = 0.7, # sensitivity score
   respath = result_path,
   perc_cutoffs = c(0.01), # c(0.9, 0.7, 0.5, 0.3)
   rank_uka_abs = T,
   b = 2,
   cs = T,
   highlight_degree = 5,
-  art_nodes = c("BTK"),
+  art_nodes = NULL, # c("BTK")
   art_lfc = -1
 )
 
@@ -71,6 +74,11 @@ for (uka_sym in uka_syms) {
   
   do.call(plot_cell_networks_kinase, params_run)
 }
+
+
+
+
+plot_kinase_pathway_heatmaps(paste0(result_path, '/thrs_0.01_spec0.7_ppi_networkv12_nperms_ukaabs1_b2'))
 
 ```
 
@@ -100,7 +108,7 @@ if (!file.exists(result_path)) {
 }
 
 params <- list(
-  fscore_cutoff = 1,
+  spec_cutoff = 1,
   control = "RL",
   respath = result_path,
   perc_cutoffs = c(0.7), # c(0.9, 0.7, 0.5, 0.3)

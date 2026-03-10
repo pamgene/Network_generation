@@ -106,7 +106,7 @@ plot_network_metric_hist <- function(metric_name, random_vals, obs_val, res.path
 
 
 
-make_network_and_stats <- function(uka, art_nodes = NULL, art_lfc = NULL, perc_cutoff, fscore_cutoff, res.path, condition = NULL, write = F, 
+make_network_and_stats <- function(uka, art_nodes = NULL, art_lfc = NULL, perc_cutoff, spec_cutoff, res.path, condition = NULL, write = F, 
 ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
   # Makes a network then computes network statistics.
   # if write = T, enrich network with pathways and plot the graph with the pathways.
@@ -139,7 +139,7 @@ ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
     write_csv(nodes_clusters, paste0(res.path, "/nodes_clusters_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
     
     # 4. Enrich network with pathways, then network with pathways
-    enrich_file <- paste0(res.path, "/enrich_results_per_pathway_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
+    enrich_file <- paste0(res.path, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
     if (!file.exists(enrich_file)) {
       pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
                                    perc_cutoff = perc_cutoff, folder = res.path, condition = condition,

@@ -70,7 +70,7 @@ visualize_network_pg <- function (
   nodes_vis$shape <- type_shapes[as.character(nodes_vis$group)]
   nodes_vis$shape[is.na(nodes_vis$shape)] <- "ellipse"
   
-  # Adaptive diverging color scale: green -> gray -> red
+  # Adaptive diverging color scale: blue -> gray -> red
   logfc_vals <- nodes_vis$LogFC %>% as.numeric()
   logfc_vals[is.infinite(logfc_vals)] <- NA
   
@@ -80,7 +80,7 @@ visualize_network_pg <- function (
   limit_val <- max(abs(p25_neg), abs(p75_pos), na.rm = TRUE)
   color_limits <- c(-limit_val, limit_val)
   
-  diverge_pal <- colorRampPalette(c("#66CC00", "#BDBDBD", "#C62828"))  # green -> gray -> red
+  diverge_pal <- colorRampPalette(c("#0000CC", "#BDBDBD", "#C62828"))  # blue -> gray -> red
   col_vals <- diverge_pal(201)  # 201 values, midpoint at 101
   
   # Clamp and scale LogFC
@@ -94,8 +94,8 @@ visualize_network_pg <- function (
   if (!is.null(highlight_degree)) {
     nodes_vis <- nodes_vis %>%
       dplyr::mutate(
-        color.border = ifelse(degree >= highlight_degree, "#419CEB", "#454545"),
-        borderWidth = ifelse(degree >= highlight_degree, 2, 1)
+        color.border = ifelse(degree >= highlight_degree, "#4C9900", "#454545"),
+        borderWidth = ifelse(degree >= highlight_degree, 2.5, 1)
       )
   } else {
     nodes_vis$color.border <- "#454545"
@@ -130,7 +130,7 @@ visualize_network_pg <- function (
       paste0("≥ ", round(limit_val, 2))
     ),
     shape = "dot",
-    color = c("#66CC00", "#BDBDBD", "#C62828"),
+    color = c("#0000CC", "#BDBDBD", "#C62828"),
     borderWidth = 0,
     font.size = 12
   )
@@ -305,34 +305,25 @@ do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, con
   enrichr_res_pw[,"P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"P.value"])), 3)
   enrichr_res_pw[,"Adjusted.P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"Adjusted.P.value"])), 3)
   
-  # Filter enrich_res_pw: Overlap minimum 3 members / pw. because term can be enriched in multiple clusters, solution is a bit complex
-  enrich_res_flag <- enrichr_res_pw %>% group_by(Term) %>%
-    summarize(overlaps = {
-      num <- as.numeric(str_extract(Overlap, "^[0-9]+"))
-      denom <- as.numeric(str_extract(Overlap, "(?<=/)[0-9]+"))
-      paste0(sum(num, na.rm = TRUE), "/", unique(denom)[1])
-    },
-    n = n(),
-    Adjusted.P.values = paste0(Adjusted.P.value, collapse = ", "))  %>%
-    mutate(flag = if_else(str_detect(overlaps, "^(1/|2/)"), TRUE, FALSE))
-  
-  enrich_res_to_filt <-enrich_res_flag  %>% filter(flag == T)
-  
+  # Filter pathways: require minimum 3 overlapping genes across all clusters
+  # When a pathway appears in multiple clusters, sum the overlapping genes
   enrichr_res_pw_filt <- enrichr_res_pw %>% 
-    filter(!Term %in% enrich_res_to_filt$Term) %>%
     group_by(Term) %>%
-    summarize(overlaps = {
-      num <- as.numeric(str_extract(Overlap, "^[0-9]+"))
-      denom <- as.numeric(str_extract(Overlap, "(?<=/)[0-9]+"))
-      paste0(sum(num, na.rm = TRUE), "/", unique(denom)[1])
-    },
-    Genes = paste0(Genes, collapse = ";"),
-    Adjusted.P.value.mean = mean(Adjusted.P.value),
-    Combined.Score.mean = mean(Combined.Score),
-    Clusters = paste0(Cluster, collapse = ", ")) %>%
+    summarize(
+      n_hits = sum(as.numeric(str_extract(Overlap, "^[0-9]+")), na.rm = TRUE),
+      pathway_size = unique(as.numeric(str_extract(Overlap, "(?<=/)[0-9]+")))[1],
+      overlap = n_hits / pathway_size,
+      n_clusters = n(),
+      Genes = paste0(Genes, collapse = ";"),
+      Adjusted.P.value.mean = mean(Adjusted.P.value),
+      Combined.Score.mean = mean(Combined.Score),
+      Clusters = paste0(Cluster, collapse = ", "),
+      .groups = 'drop'
+    ) %>%
+    filter(n_hits > 2) %>%  # Remove pathways with ≤2 overlapping genes
     dplyr::rename(Pathway = Term)
   
-  #with the top 75 percentile based on the Combined.Score column
+  #filter for the top 75 percentile based on the Combined.Score column
   if ("Combined.Score" %in% colnames(enrichr_res_pw)) {
     combined_score_threshold <- quantile(as.numeric(enrichr_res_pw_filt$Combined.Score.mean), 0.25, na.rm = TRUE)
     enrichr_res_pw_filt <- enrichr_res_pw_filt %>% dplyr::filter(as.numeric(Combined.Score.mean) >= combined_score_threshold)
@@ -342,9 +333,18 @@ do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, con
     enrichr_res_pw_filt <- add_reactome_hierarchy(pw_df = enrichr_res_pw_filt, rpws = rpws, rel = rpwrel)
   }
   write_csv(enrichr_res_pw_filt,
-            paste0(folder, "/enrich_results_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+            paste0(folder, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), "_all.csv"))
   
-  return(enrichr_res_pw_filt)
+  # For each Genes value, choose one pathway based on hierarchy_n
+
+  enrichr_res_pw_filt_short <- enrichr_res_pw_filt %>%
+    group_by(Genes) %>%
+    slice_min(order_by = hierarchy_n, with_ties = FALSE) %>%
+    ungroup() 
+  write_csv(enrichr_res_pw_filt_short,
+            paste0(folder, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+  
+  return(enrichr_res_pw_filt_short)
   
   # browser()
   # enrichr_res_pw_clusters <- enrichr_res_pw %>% filter(Term %in% enrichr_res_pw_filt$Pathway)
@@ -493,9 +493,9 @@ add_reactome_hierarchy <- function(pw_df, rpws, rel) {
   pw_df_n_grouped2 <- pw_df_n_grouped1 %>%
     filter(is_redundant != 1) %>%
     select(-first_hierarchy, -is_upstream, -is_redundant) %>%
-    relocate(Group_Pw, Pathway, Genes, overlaps, Adjusted.P.value.mean, Combined.Score.mean, Clusters)
+    relocate(Group_Pw, Pathway, Genes, n_hits, pathway_size, overlap, Adjusted.P.value.mean, Combined.Score.mean, Clusters)
   pw_df_n_grouped2$hierarchy_n = lengths(strsplit(pw_df_n_grouped2$hierarchy_ids, ";"))
-  pw_df_n_grouped2 <- pw_df_n_grouped2[,c("Group_Pw", "Pathway", "Genes", "hierarchy_n", "overlaps",  "Adjusted.P.value.mean", 
+  pw_df_n_grouped2 <- pw_df_n_grouped2[,c("Group_Pw", "Pathway", "Genes", "hierarchy_n", "n_hits", "pathway_size", "overlap",  "Adjusted.P.value.mean", 
                                           "Combined.Score.mean", "Clusters", "hierarchy_ids", "pathway_id", "group")]
   pw_df_n_grouped2 %>% filter(hierarchy_n > 1)
   
@@ -808,7 +808,7 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
 }
 
 
-plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, fscore_cutoff, respath, perc_cutoffs,
+plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoff, respath, perc_cutoffs,
                                rank_uka_abs = T, ppi_network = ppi_networkv12, b, cs,
                                wp_ontology_names = c("metabolic pathway", "signaling pathway", "signaling", "regulatory pathway"), 
                                highlight_degree) {
@@ -840,20 +840,21 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, fscore_cutoff, re
       # Take top hits for uka for observed score
       uka_filt <- uka_parsed %>%
         filter(Sgroup_contrast == condition) %>%
-        uka_top(fscore_cutoff = fscore_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff, cs = cs)
+        uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff, cs = cs)
       make_network_and_stats(
         uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, perc_cutoff = perc_cutoff,
-        fscore_cutoff = fscore_cutoff, res.path = respath, condition = condition,
+        spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
         write = T, ppi_network = ppi_network,
         b = b, wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree
       )
     }
   }
+  
 }
 
 
 plot_cell_networks <- function(uka, sens, del_cells = NULL, 
-                               control, fscore_cutoff, zscore, best_drug_per_target = NULL, respath, perc_cutoffs, 
+                               control, spec_cutoff, zscore, best_drug_per_target = NULL, respath, perc_cutoffs, 
                                rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12, only_kinase = F, b, cs,
                                wp_ontology_names, highlight_degree) {
   
@@ -891,14 +892,14 @@ plot_cell_networks <- function(uka, sens, del_cells = NULL,
     temp_files <- c()
     for (cell in common_cells) {
       # Take top hits for uka and sens for observed score
-      uka_filt <- uka_parsed %>% filter(cell_line == cell) %>% uka_top(fscore_cutoff = fscore_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff)
+      uka_filt <- uka_parsed %>% filter(cell_line == cell) %>% uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff)
       sens_filt <- sens_parsed %>% filter(cell_line == cell) %>% sens_top(perc_cutoff, balance)
       # For random sampling, filter for cell
       uka_cell_all <- uka_parsed %>% filter(cell_line == cell)
       
       obs_res <- make_network_and_stats(
         uka = uka_filt, sens = sens_filt,
-        perc_cutoff = perc_cutoff, fscore_cutoff = fscore_cutoff,
+        perc_cutoff = perc_cutoff, spec_cutoff = spec_cutoff,
         res.path = respath, condition = cell, write = T,
         ppi_network = ppi_network, relative_to = "n_nodes", only_kinase = only_kinase, b = b, 
         wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree

@@ -65,7 +65,7 @@ plot_network_metric_hist_facet <- function(all_metrics_df, all_obs_df, res.path)
 # Generalized permutation scoring function
 # Permute UKA, keep sens constant
 pOverlapScore = function(score_obs, uka_cell_all, sens_filt, cell, nsample, nPerms = DFT.PERMS, 
-                         fscore_cutoff, rank_uka_abs, perc_cutoff, uka_fam = NULL, family_mode = FALSE) {
+                         spec_cutoff, rank_uka_abs, perc_cutoff, uka_fam = NULL, family_mode = FALSE) {
   score_perm <- rep(NA, nPerms)
   if (!family_mode) {
     for (i in 1:nPerms){
@@ -90,7 +90,7 @@ pOverlapScore = function(score_obs, uka_cell_all, sens_filt, cell, nsample, nPer
 }
 
 pNetworkScore = function(score_obs, score_obs_core, score_obs_core_inv, uka_cell_all, sens_filt, cell, nsample, nPerms = DFT.PERMS, 
-                         perc_cutoff, fscore_cutoff, respath, condition,
+                         perc_cutoff, spec_cutoff, respath, condition,
                          rank_uka_abs, ppi_network, relative_to, b = b) {  
   
   score_perm <- rep(NA, nPerms)
@@ -102,7 +102,7 @@ pNetworkScore = function(score_obs, score_obs_core, score_obs_core_inv, uka_cell
     uka_filt_random <- uka_cell_all %>% uka_top(rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff)
     print(paste0("Cell: ", cell, ", Network permutation: ", i, "..."))
     res <- make_network_and_stats(uka = uka_filt_random, sens = sens_filt, perc_cutoff = perc_cutoff, 
-                                  fscore_cutoff = fscore_cutoff, res.path = respath, condition = cell, write = FALSE, ppi_network = ppi_network,
+                                  spec_cutoff = spec_cutoff, res.path = respath, condition = cell, write = FALSE, ppi_network = ppi_network,
                                   relative_to = relative_to, b = b)
     if (!is.null(res)) {
       metrics <- as.data.frame(as.list(res), stringsAsFactors = FALSE) %>% mutate(nperm = i)
@@ -245,7 +245,7 @@ update_golden_results_row <- function(results, cell, perc_cutoff, vals) {
 }
 
 # Helper to compute overlap and family-wise overlap scores and manage temp files
-compute_golden_overlap_scores <- function(uka_filt, sens_filt, uka_cell_all, uka_fam, cell, perc_cutoff, nperms_overlap, respath, fscore_cutoff, rank_uka_abs) {
+compute_golden_overlap_scores <- function(uka_filt, sens_filt, uka_cell_all, uka_fam, cell, perc_cutoff, nperms_overlap, respath, spec_cutoff, rank_uka_abs) {
   vals <- list()
   # observed score
   score_obs <- overlap_uka_sens(uka_filt$name, sens_filt$name)
@@ -258,7 +258,7 @@ compute_golden_overlap_scores <- function(uka_filt, sens_filt, uka_cell_all, uka
     cell = cell,
     nsample = nrow(uka_filt),
     nPerms = nperms_overlap,
-    fscore_cutoff = fscore_cutoff,
+    spec_cutoff = spec_cutoff,
     rank_uka_abs = rank_uka_abs,
     perc_cutoff = perc_cutoff
   )
@@ -283,7 +283,7 @@ compute_golden_overlap_scores <- function(uka_filt, sens_filt, uka_cell_all, uka
     cell = cell,
     nsample = nrow(uka_filt),
     nPerms = nperms_overlap,
-    fscore_cutoff = fscore_cutoff,
+    spec_cutoff = spec_cutoff,
     rank_uka_abs = rank_uka_abs,
     perc_cutoff = perc_cutoff,
     uka_fam = uka_fam,
@@ -303,14 +303,14 @@ compute_golden_overlap_scores <- function(uka_filt, sens_filt, uka_cell_all, uka
 
 # New version: returns metrics for this cell/perc_cutoff only; accumulation is handled outside
 compute_golden_network_scores <- function(uka_filt, sens_filt, uka_cell_all, cell, 
-                                          perc_cutoff, fscore_cutoff, respath, rank_uka_abs, 
+                                          perc_cutoff, spec_cutoff, respath, rank_uka_abs, 
                                           ppi_network, nperms_network, relative_to, b) {
   vals <- list()
   # observed network score and metrics
   
   obs_res <- make_network_and_stats(
     uka = uka_filt, sens = sens_filt,
-    perc_cutoff = perc_cutoff, fscore_cutoff = fscore_cutoff,
+    perc_cutoff = perc_cutoff, spec_cutoff = spec_cutoff,
     res.path = respath, condition = cell, write = F,
     ppi_network = ppi_network, relative_to = relative_to, b = b
   )
@@ -337,7 +337,7 @@ compute_golden_network_scores <- function(uka_filt, sens_filt, uka_cell_all, cel
     nsample = nrow(uka_filt),
     nPerms = nperms_network,
     perc_cutoff = perc_cutoff,
-    fscore_cutoff = fscore_cutoff,
+    spec_cutoff = spec_cutoff,
     respath = respath,
     condition = cell,
     rank_uka_abs = rank_uka_abs, 
@@ -364,7 +364,7 @@ compute_golden_network_scores <- function(uka_filt, sens_filt, uka_cell_all, cel
 }
 
 make_golden_score <- function(uka, sens, del_cells = NULL, 
-                              control, fscore_cutoff, zscore = F, best_drug_per_target = NULL, respath, score_overlap = T, 
+                              control, spec_cutoff, zscore = F, best_drug_per_target = NULL, respath, score_overlap = T, 
                               uka_fam, score_network = T, perc_cutoffs, nperms_overlap = 500, nperms_network = 50,
                               rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12,
                               relative_to = "n_nodes", b, cs) {
@@ -378,7 +378,7 @@ make_golden_score <- function(uka, sens, del_cells = NULL,
   sens_parsed <- clean_sens_to_kinograte(sens, control = control, zscore = zscore,
                                            best_drug_per_target = best_drug_per_target)
   
-  uka_parsed <- clean_uka_to_kinograte(uka, fscore_cutoff = fscore_cutoff, control = "RL", cs = cs)
+  uka_parsed <- clean_uka_to_kinograte(uka, spec_cutoff = spec_cutoff, control = "RL", cs = cs)
   # Find common cell lines in uka and sens
   common_cells <- intersect(unique(uka_parsed$cell_line), unique(sens_parsed$cell_line))
   if (!is.null(del_cells)){
@@ -433,7 +433,7 @@ make_golden_score <- function(uka, sens, del_cells = NULL,
           perc_cutoff = perc_cutoff,
           nperms_overlap = nperms_overlap,
           respath = respath,
-          fscore_cutoff = fscore_cutoff,
+          spec_cutoff = spec_cutoff,
           rank_uka_abs = rank_uka_abs
         )
         vals <- c(vals, overlap_res$vals)
@@ -453,7 +453,7 @@ make_golden_score <- function(uka, sens, del_cells = NULL,
           uka_cell_all = uka_cell_all,
           cell = cell,
           perc_cutoff = perc_cutoff,
-          fscore_cutoff = fscore_cutoff,
+          spec_cutoff = spec_cutoff,
           respath = respath,
           rank_uka_abs = rank_uka_abs, 
           ppi_network = ppi_network,
@@ -505,7 +505,7 @@ make_golden_score <- function(uka, sens, del_cells = NULL,
 }
 
 make_golden_score_p <- function(uka, sens, del_cells = NULL, 
-                              control, fscore_cutoff, zscore = F, best_drug_per_target = NULL, respath, score_overlap = T, 
+                              control, spec_cutoff, zscore = F, best_drug_per_target = NULL, respath, score_overlap = T, 
                               uka_fam, score_network = T, perc_cutoffs, nperms_overlap = 500, nperms_network = 50,
                               rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12,
                               relative_to = "n_nodes", b, cs) {
@@ -518,7 +518,7 @@ make_golden_score_p <- function(uka, sens, del_cells = NULL,
   # Parse input data, filter for comparisons vs control
   sens_parsed <- clean_sens_to_kinograte(sens, control = control, zscore = zscore,
                                            best_drug_per_target = best_drug_per_target)
-  uka_parsed <- clean_uka_to_kinograte(uka, fscore_cutoff = fscore_cutoff, control = "RL", cs = cs)
+  uka_parsed <- clean_uka_to_kinograte(uka, spec_cutoff = spec_cutoff, control = "RL", cs = cs)
   # Find common cell lines in uka and sens
   common_cells <- intersect(unique(uka_parsed$cell_line), unique(sens_parsed$cell_line))
   if (!is.null(del_cells)){
@@ -570,7 +570,7 @@ make_golden_score_p <- function(uka, sens, del_cells = NULL,
               perc_cutoff = perc_cutoff,
               nperms_overlap = nperms_overlap,
               respath = respath,
-              fscore_cutoff = fscore_cutoff,
+              spec_cutoff = spec_cutoff,
               rank_uka_abs = rank_uka_abs
             )
             vals <- c(vals, overlap_res$vals)
@@ -591,7 +591,7 @@ make_golden_score_p <- function(uka, sens, del_cells = NULL,
               uka_cell_all = uka_cell_all,
               cell = cell,
               perc_cutoff = perc_cutoff,
-              fscore_cutoff = fscore_cutoff,
+              spec_cutoff = spec_cutoff,
               respath = respath,
               rank_uka_abs = rank_uka_abs, 
               ppi_network = ppi_network,
@@ -651,14 +651,14 @@ make_golden_score_p <- function(uka, sens, del_cells = NULL,
 
 
 # data cleaning functions
-clean_uka_to_kinograte <- function(uka, control, fscore_cutoff = 0, del_cell = NULL, cs = F){
+clean_uka_to_kinograte <- function(uka, control, spec_cutoff = 0, del_cell = NULL, cs = F){
 
   finalscore_col <- if (cs) "Specificity Score" else "Mean Specificity Score"
   stat_col <- if (cs) "Kinase Statistic" else "Median Kinase Statistic"
   # --- Handle both "X vs control" and "control vs X" in contrast, flip sign if control is left ---
   uka_clean <- uka %>%
     clean_tercen_columns() %>%
-    filter(.data[[finalscore_col]] > fscore_cutoff) %>%
+    filter(.data[[finalscore_col]] > spec_cutoff) %>%
     filter(str_detect(contrast, paste0(" vs ", control)) | str_detect(contrast, paste0(control, " vs "))) %>%
     mutate(contrast = gsub(contrast, pattern = "-", replacement = "")) %>%
     mutate(
