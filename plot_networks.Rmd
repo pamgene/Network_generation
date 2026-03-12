@@ -24,14 +24,19 @@ rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent"
 
 ```{r}
 
-input_folder <- "uka/190143Dublin"
-input_folder <- "uka/190136UCLUK"
+input_folder <- "uka/180377"
 
-uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows()
+uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows() %>% dplyr::rename(Sgroup_contrast = SG_contrast)
+unique(uka$SG_contrast)
+
+my_contrasts <- c('C_SG2 vs SG1', "T05_SG2 vs SG1")
+
+uka <- uka %>% 
+  filter(Sgroup_contrast %in% my_contrasts) 
 
 from_vals = unique(uka$Sgroup_contrast)
 from_vals
-to_vals <- c("T1ATMi vs DMSO", "T2ATRi vs DMSO", "T3Combi vs DMSO") #c("Sensitive_T vs C", "Resistant_T vs C")
+to_vals <- c("Basal", "Activated")
 from_vals
 to_vals
 
@@ -89,8 +94,8 @@ for (uka_sym in uka_syms) {
 
 
 
-plot_kinase_pathway_heatmaps(paste0(result_path, '/190143Dublin_network'))
-plot_kinase_pathway_heatmaps(paste0(result_path, '/results_BTK_artificial'))
+plot_kinase_pathway_heatmaps(paste0(result_path, '/180377_Network_pws'))
+
 
 ```
 

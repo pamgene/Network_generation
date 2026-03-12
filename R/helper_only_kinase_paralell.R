@@ -771,7 +771,7 @@ create_combined_heatmap <- function(heatmap_data_list, w_combined, h, save_folde
     
     
     # Save combined heatmap
-    combined_filename <- paste0(save_folder, "/Kinase_Pathway_heatmap_all_comparisons.png")
+    combined_filename <- paste0(save_folder, "/Kinase_Pathway_heatmap_overlapping_comparisons.png")
     png(combined_filename, 
         width = w_combined, 
         height = h, 
