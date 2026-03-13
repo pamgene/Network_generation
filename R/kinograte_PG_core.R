@@ -252,12 +252,12 @@ call_sr <- function(from, to, cost, node_names, node_prizes) {
 }
 
 kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b = 1.5, 
-                         mu = 0.005, cluster = TRUE, seed = NULL, res.path, perc_cutoff, 
+                         mu = 0.005, cluster = TRUE, seed = NULL, res.path, spec_cutoff, 
                          condition, write) {
   
   print('Using fast kinograte...')
-  maintitle <- paste0(condition, " - Network with percentile rank cutoff = ", 
-                      perc_cutoff, ", Number of nodes = ", nrow(df))
+  maintitle <- paste0(condition, " - Network with specificity cutoff = ", 
+                      spec_cutoff, ", Number of nodes = ", nrow(df))
   
   terms <- df$prize
   names(terms) <- df$name
@@ -333,8 +333,8 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
     missing_df <- df %>% dplyr::filter(name %in% missing_nodes)
     readr::write_csv(
       missing_df, 
-      paste0(res.path, "/missing_nodes_", condition, "_p", 
-             sub(".*0\\.", "", perc_cutoff), ".csv")
+      paste0(res.path, "/missing_nodes_", condition, "_spec", 
+             spec_cutoff, ".csv")
     )
   } else {
     missing_df <- NULL
@@ -350,8 +350,8 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
   if (write) {
     readr::write_csv(
       nodes_to_write, 
-      paste0(res.path, "/nodes_", condition, "_p", 
-             sub(".*0\\.", "", perc_cutoff), ".csv")
+      paste0(res.path, "/nodes_", condition, "_spec", 
+             spec_cutoff, ".csv")
     )
   }
   
@@ -414,9 +414,9 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
 }
 
 kinograte_pg <- function (df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b = 1.5, 
-                          mu = 0.005, cluster = TRUE, seed = NULL, res.path, perc_cutoff, condition, write) {
+                          mu = 0.005, cluster = TRUE, seed = NULL, res.path, spec_cutoff, condition, write) {
   
-  maintitle = paste0(condition, " - Network with percentile rank cutoff = ", perc_cutoff, ", Number of nodes = ", nrow(df))
+  maintitle = paste0(condition, " - Network with specificity cutoff = ", spec_cutoff, ", Number of nodes = ", nrow(df))
   
   terms <- df$prize
   names(terms) <- df$name
@@ -467,7 +467,7 @@ kinograte_pg <- function (df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b 
   missing_nodes <- setdiff(names(terms), subnet_nodes)
   if (length(missing_nodes) > 0 && write) {
     missing_df <- df %>% filter(name %in% missing_nodes)
-    write_csv(missing_df, paste0(res.path, "/missing_nodes_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+    write_csv(missing_df, paste0(res.path, "/missing_nodes_", condition, "_spec", spec_cutoff, ".csv"))
   } else {
     missing_df = NULL
   }
@@ -480,8 +480,8 @@ kinograte_pg <- function (df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b 
   if (write) {
     readr::write_csv(
       nodes_to_write, 
-      paste0(res.path, "/nodes_", condition, "_p", 
-             sub(".*0\\.", "", perc_cutoff), ".csv")
+      paste0(res.path, "/nodes_", condition, "_spec", 
+             spec_cutoff, ".csv")
     )
   }
   

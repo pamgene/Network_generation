@@ -5,6 +5,7 @@ library(ggtext)
 # library(ggVennDiagram)
 library(ComplexHeatmap)
 library(RColorBrewer)
+library(circlize)
 
 plot_var_explained <- function (object, x = "view", y = "factor", split_by = NA, plot_total = FALSE, 
           factors = "all", min_r2 = 0, max_r2 = NULL, legend = TRUE, 
@@ -998,12 +999,490 @@ plot_pcas <- function(df_list, mycolor, myshape, e, joinby,
 #   
 #   ggsave(filename, p, width = 11, height = 8, units = "cm")
 # }
-#   ggsave(filename, p, width = 11, height = 8, units = "cm")
-# }
-#   ggsave(filename, p, width = 11, height = 8, units = "cm")
-# }
-# }
-#   ggsave(filename, p, width = 11, height = 8, units = "cm")
-# }
-#   ggsave(filename, p, width = 11, height = 8, units = "cm")
-# }
+
+
+############################
+### Kinase Pathway Plots ###
+############################
+
+# Helper function to create combined heatmap for overlapping pathways
+create_combined_heatmap <- function(heatmap_data_list, w_combined, h, save_folder){
+  # Find overlapping and union pathways
+  all_pathways <- lapply(heatmap_data_list, function(x) rownames(x$matrix))
+  common_pathways <- Reduce(intersect, all_pathways)
+  union_pathways <- Reduce(union, all_pathways)
+  
+  # Calculate global color limits across all comparisons
+  all_logfc_vals <- unlist(lapply(heatmap_data_list, function(x) {
+    matrix_subset <- x$matrix[rownames(x$matrix) %in% common_pathways, , drop = FALSE]
+    as.numeric(matrix_subset)
+  }))
+  all_logfc_vals <- all_logfc_vals[!is.na(all_logfc_vals) & is.finite(all_logfc_vals)]
+  
+  if (length(all_logfc_vals) > 0) {
+    p25_neg <- quantile(all_logfc_vals[all_logfc_vals < 0], probs = 0.25, na.rm = TRUE)
+    p75_pos <- quantile(all_logfc_vals[all_logfc_vals > 0], probs = 0.75, na.rm = TRUE)
+    limit_val <- max(abs(p25_neg), abs(p75_pos), na.rm = TRUE)
+    
+    if (!is.finite(limit_val) || limit_val == 0) {
+      limit_val <- max(abs(all_logfc_vals), na.rm = TRUE)
+    }
+    
+    global_color_limits <- c(-limit_val, limit_val)
+  } else {
+    global_color_limits <- c(-1, 1)
+  }
+  
+  col_fun <- colorRamp2(c(global_color_limits[1], 0, global_color_limits[2]), 
+                        c("#0000CC", "#BDBDBD", "#C62828"))
+  
+  
+  
+  if (length(common_pathways) > 0) {
+    
+    # Create individual heatmaps for each comparison (common pathways only)
+    individual_heatmaps <- list()
+    
+    for (comp_name in names(heatmap_data_list)) {
+      # Get matrix subset for common pathways only
+      comp_matrix <- heatmap_data_list[[comp_name]]$matrix
+      comp_matrix_subset <- comp_matrix[rownames(comp_matrix) %in% common_pathways, , drop = FALSE]
+
+      comp_matrix_subset <- comp_matrix_subset[
+        !apply(comp_matrix_subset == 0, 1, all),
+        !apply(comp_matrix_subset == 0, 2, all),
+        drop = FALSE
+      ]
+      
+      # Ensure same pathway order across all comparisons
+      comp_matrix_subset <- comp_matrix_subset[common_pathways, , drop = FALSE]
+      comp_matrix_subset[is.na(comp_matrix_subset)] <- 0
+      
+      # Create heatmap for this comparison
+      ht_individual <- Heatmap(
+        comp_matrix_subset,
+        name = "LogFC",
+        col = col_fun,
+        cluster_rows = FALSE,  # Keep pathway order consistent
+        cluster_columns = TRUE,
+        show_row_names = TRUE,
+        show_column_names = TRUE,
+        column_title = comp_name,
+        column_title_gp = gpar(fontsize = 8, fontface = "bold"),
+        row_names_gp = gpar(fontsize = 6),
+        column_names_gp = gpar(fontsize = 6),
+        row_names_max_width = unit(8, "cm"),
+        rect_gp = gpar(col = "black", lwd = 0.5),
+        show_heatmap_legend = FALSE  # Only show legend on first heatmap
+      )
+      
+      individual_heatmaps[[comp_name]] <- ht_individual
+    }
+    
+    # Show legend only on the first heatmap
+    individual_heatmaps[[1]]@heatmap_param$show_heatmap_legend <- TRUE
+    individual_heatmaps[[1]]@heatmap_param$heatmap_legend_param <- list(
+      title = "LogFC", 
+      title_gp = gpar(fontsize = 10),
+      labels_gp = gpar(fontsize = 8)
+    )
+    
+    # Combine heatmaps horizontally
+    ht_combined <- Reduce(`+`, individual_heatmaps)
+    
+    # Calculate dimensions based on number of comparisons
+    n_comparisons <- length(heatmap_data_list)
+    n_pathways_combined <- length(common_pathways)
+    
+    # Adjust width based on number of comparisons
+    if (!is.null(w_combined)){
+      if (n_comparisons == 2) {
+        w_combined <- 25
+      } else if (n_comparisons == 3) {
+        w_combined <- 35
+      } else {
+        w_combined <- 45
+      }
+    }
+    
+    
+    
+    # Save combined heatmap
+    combined_filename <- paste0(save_folder, "/Kinase_Pathway_heatmap_overlapping_comparisons.png")
+    png(combined_filename, 
+        width = w_combined, 
+        height = h, 
+        units = "cm",
+        res = 300)
+    draw(ht_combined)
+    dev.off()
+    
+    cat("Saved combined heatmap:", combined_filename, "\n")
+    cat("Found", length(common_pathways), "overlapping pathways across", 
+        length(heatmap_data_list), "comparisons\n")
+    
+  } else {
+    cat("No overlapping pathways found across comparisons\n")
+  }
+}
+
+# Function to create combined heatmap using union of pathways (for exactly 2 comparisons)
+create_union_combined_heatmap <- function(heatmap_data_list, w_combined, h, save_folder) {
+  # Only works with exactly 2 comparisons
+  if (length(heatmap_data_list) != 2) {
+    cat("Union combined heatmap only works with exactly 2 comparisons. Found", 
+        length(heatmap_data_list), "comparisons.\n")
+    return()
+  }
+  
+  # Get pathway sets for each comparison
+  comp_names <- names(heatmap_data_list)
+  pathways_comp1 <- rownames(heatmap_data_list[[1]]$matrix)
+  pathways_comp2 <- rownames(heatmap_data_list[[2]]$matrix)
+  
+  # Find common and unique pathways
+  common_pathways <- intersect(pathways_comp1, pathways_comp2)
+  unique_comp1 <- setdiff(pathways_comp1, pathways_comp2)
+  unique_comp2 <- setdiff(pathways_comp2, pathways_comp1)
+  
+  # Create ordered pathway list: common, unique_comp1, unique_comp2
+  ordered_pathways <- c(common_pathways, unique_comp1, unique_comp2)
+  
+  # Create pathway category factor for row splitting
+  pathway_categories <- c(
+    rep("1", length(common_pathways)),
+    rep("2", length(unique_comp1)),
+    rep("3", length(unique_comp2))
+  )
+  names(pathway_categories) <- ordered_pathways
+  pathway_split <- factor(pathway_categories, levels = c("1", "2", "3"))
+  
+  cat("Found", length(common_pathways), "common pathways,", 
+      length(unique_comp1), "unique to", comp_names[1], ",", 
+      length(unique_comp2), "unique to", comp_names[2], "\n")
+  
+  # Calculate global color limits across all comparisons (including all pathways)
+  all_logfc_vals <- unlist(lapply(heatmap_data_list, function(x) {
+    as.numeric(x$matrix)
+  }))
+  all_logfc_vals <- all_logfc_vals[!is.na(all_logfc_vals) & is.finite(all_logfc_vals)]
+  
+  if (length(all_logfc_vals) > 0) {
+    p25_neg <- quantile(all_logfc_vals[all_logfc_vals < 0], probs = 0.25, na.rm = TRUE)
+    p75_pos <- quantile(all_logfc_vals[all_logfc_vals > 0], probs = 0.75, na.rm = TRUE)
+    limit_val <- max(abs(p25_neg), abs(p75_pos), na.rm = TRUE)
+    
+    if (!is.finite(limit_val) || limit_val == 0) {
+      limit_val <- max(abs(all_logfc_vals), na.rm = TRUE)
+    }
+    
+    global_color_limits <- c(-limit_val, limit_val)
+  } else {
+    global_color_limits <- c(-1, 1)
+  }
+  
+  col_fun <- colorRamp2(c(global_color_limits[1], 0, global_color_limits[2]), 
+                        c("#0000CC", "#BDBDBD", "#C62828"))
+  
+  # Create matrices for each comparison with union of pathways
+  individual_heatmaps <- list()
+  
+  for (i in 1:2) {
+    comp_name <- comp_names[i]
+    comp_matrix <- heatmap_data_list[[comp_name]]$matrix
+    
+    # Create a new matrix with all pathways, filled with zeros for missing pathways
+    union_matrix <- matrix(0, nrow = length(ordered_pathways), ncol = ncol(comp_matrix),
+                          dimnames = list(ordered_pathways, colnames(comp_matrix)))
+    
+    # Fill in the actual values for pathways that exist in this comparison
+    existing_pathways <- intersect(ordered_pathways, rownames(comp_matrix))
+    union_matrix[existing_pathways, ] <- comp_matrix[existing_pathways, , drop = FALSE]
+    
+    # Replace NA with 0
+    union_matrix[is.na(union_matrix)] <- 0
+    
+    # Create heatmap for this comparison
+    ht_individual <- Heatmap(
+      union_matrix,
+      name = "LogFC",
+      col = col_fun,
+      cluster_rows = FALSE,  # Keep pathway order consistent
+      cluster_columns = TRUE,
+      show_row_names = TRUE,
+      show_column_names = TRUE,
+      row_split = pathway_split,  # Split rows by pathway category
+      column_title = comp_name,
+      column_title_gp = gpar(fontsize = 8, fontface = "bold"),
+      row_names_gp = gpar(fontsize = 6),
+      column_names_gp = gpar(fontsize = 6),
+      row_names_max_width = unit(8, "cm"),
+      rect_gp = gpar(col = "black", lwd = 0.5),
+      show_heatmap_legend = FALSE  # Only show legend on first heatmap
+    )
+    
+    individual_heatmaps[[comp_name]] <- ht_individual
+  }
+  
+  # Show legend only on the first heatmap
+  individual_heatmaps[[1]]@heatmap_param$show_heatmap_legend <- TRUE
+  individual_heatmaps[[1]]@heatmap_param$heatmap_legend_param <- list(
+    title = "LogFC", 
+    title_gp = gpar(fontsize = 10),
+    labels_gp = gpar(fontsize = 8)
+  )
+  
+  # Combine heatmaps horizontally
+  ht_combined <- Reduce(`+`, individual_heatmaps)
+  
+  # Set width for 2 comparisons
+  if (is.null(w_combined)) {
+    w_combined <- 35  # Default for union heatmap with 2 comparisons
+  }
+  
+  # Save combined union heatmap
+  union_filename <- paste0(save_folder, "/Kinase_Pathway_heatmap_union_comparisons.png")
+  png(union_filename, 
+      width = w_combined, 
+      height = h, 
+      units = "cm",
+      res = 300)
+  draw(ht_combined)
+  dev.off()
+  
+  cat("Saved union combined heatmap:", union_filename, "\n")
+}
+
+# Function to create kinase-pathway heatmaps from network analysis results
+plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 20, h = 14, w_combined = 25) {
+  
+  if (is.null(save_folder)) {
+    save_folder <- file.path(result_folder, "kinase_pathway_heatmaps")
+  }
+  
+  if (!dir.exists(save_folder)) {
+    dir.create(save_folder, recursive = TRUE)
+  }
+  
+  # Find all nodes files with pathways
+  nodes_pw_files <- list.files(result_folder, 
+                              pattern = "nodes_.*_with_pathways\\.csv$", 
+                              full.names = TRUE, recursive = TRUE)
+  
+  if (length(nodes_pw_files) == 0) {
+    stop("No nodes_*_with_pathways.csv files found in the specified folder")
+  }
+  
+  # Extract spec_cutoff and comparison names from filenames
+  extract_file_info <- function(filepath) {
+    basename_file <- basename(filepath)
+    # Remove nodes_ prefix and _with_pathways.csv suffix
+    full_comparison <- gsub("^nodes_(.*)_with_pathways\\.csv$", "\\1", basename_file)
+    
+    # Extract spec cutoff
+    spec_match <- regmatches(full_comparison, regexpr("_spec[0-9.]+$", full_comparison))
+    if (length(spec_match) > 0) {
+      spec_cutoff <- gsub("_spec", "", spec_match)
+      comparison_name <- gsub("_spec[0-9.]+$", "", full_comparison)
+    } else {
+      spec_cutoff <- "unknown"
+      comparison_name <- full_comparison
+    }
+    
+    return(list(spec_cutoff = spec_cutoff, comparison = comparison_name, full_comparison = full_comparison))
+  }
+  
+  # Get file information for all files
+  file_info_list <- lapply(nodes_pw_files, extract_file_info)
+  names(file_info_list) <- nodes_pw_files
+  
+  # Group files by spec_cutoff
+  spec_cutoffs <- unique(sapply(file_info_list, function(x) x$spec_cutoff))
+  cat("Found spec_cutoffs:", paste(spec_cutoffs, collapse = ", "), "\n")
+  
+  # Process each spec_cutoff separately
+  for (current_spec_cutoff in spec_cutoffs) {
+    cat("\n=== Processing spec_cutoff:", current_spec_cutoff, "===\n")
+    
+    # Get files for this spec_cutoff
+    files_for_cutoff <- names(file_info_list)[sapply(file_info_list, function(x) x$spec_cutoff == current_spec_cutoff)]
+    
+    if (length(files_for_cutoff) == 0) {
+      cat("No files found for spec_cutoff:", current_spec_cutoff, "\n")
+      next
+    }
+    
+    # Create spec_cutoff-specific save folder
+    spec_save_folder <- file.path(save_folder, paste0("spec_", current_spec_cutoff))
+    if (!dir.exists(spec_save_folder)) {
+      dir.create(spec_save_folder, recursive = TRUE)
+    }
+    
+    # Extract comparison names for this spec_cutoff
+    comparison_names <- sapply(files_for_cutoff, function(f) file_info_list[[f]]$comparison)
+    names(files_for_cutoff) <- comparison_names
+    
+    # Process each comparison for this spec_cutoff
+    heatmap_data_list <- list()
+    
+    for (i in seq_along(files_for_cutoff)) {
+      comparison <- names(files_for_cutoff)[i]
+      pw_file <- files_for_cutoff[i]
+      
+      cat("Processing comparison:", comparison, "(spec_cutoff:", current_spec_cutoff, ")\n")
+      
+      # Find corresponding nodes file (without pathways)
+      nodes_file_pattern <- gsub("_with_pathways\\.csv$", "\\.csv", basename(pw_file))
+      nodes_file <- list.files(dirname(pw_file), 
+                              pattern = paste0("^", gsub("\\.", "\\\\.", nodes_file_pattern), "$"), 
+                              full.names = TRUE)[1]
+      
+      if (is.na(nodes_file) || !file.exists(nodes_file)) {
+        warning("Could not find corresponding nodes file for: ", comparison, " (spec_cutoff: ", current_spec_cutoff, ")")
+        next
+      }
+
+      # Read the files
+      tryCatch({
+        nodes_pw <- read_csv(pw_file, show_col_types = FALSE)
+        nodes <- read_csv(nodes_file, show_col_types = FALSE)
+        
+        # Separate longer delim for pathways and join with nodes data
+        nodes_pw_expanded <- nodes_pw %>%
+          separate_longer_delim(pathway, delim = ",") %>%
+          filter(!is.na(pathway), pathway != "") %>%
+          left_join(nodes %>% select(Protein, type, LogFC), 
+                   by = "Protein") %>%
+          filter(type %in% c("Kinase", "Artificial")) %>%
+          select(Protein, pathway, LogFC) %>%
+          distinct()
+        
+        if (nrow(nodes_pw_expanded) == 0) {
+          warning("No kinase data found for comparison: ", comparison, " (spec_cutoff: ", current_spec_cutoff, ")")
+          next
+        }
+        
+        # Create matrix for heatmap
+        heatmap_matrix <- nodes_pw_expanded %>%
+          pivot_wider(names_from = Protein, values_from = LogFC, 
+                     values_fn = mean, values_fill = NA) %>%
+          column_to_rownames("pathway") %>%
+          as.matrix()
+        
+        # Remove rows and columns with all NA
+        heatmap_matrix <- heatmap_matrix[!apply(is.na(heatmap_matrix), 1, all), 
+                                       !apply(is.na(heatmap_matrix), 2, all), drop = FALSE]
+        heatmap_matrix[is.na(heatmap_matrix)] <- 0
+        
+        if (ncol(heatmap_matrix) == 0 || nrow(heatmap_matrix) == 0) {
+          warning("Empty matrix for comparison: ", comparison, " (spec_cutoff: ", current_spec_cutoff, ")")
+          next
+        }
+        
+        # Store for later combined analysis
+        heatmap_data_list[[comparison]] <- list(
+          matrix = heatmap_matrix,
+          data = nodes_pw_expanded
+        )
+        
+        # Apply the same color logic as visualize_network_pg
+        logfc_vals <- as.numeric(heatmap_matrix)
+        logfc_vals <- logfc_vals[!is.na(logfc_vals) & is.finite(logfc_vals)]
+        
+        if (length(logfc_vals) > 0) {
+          p25_neg <- quantile(logfc_vals[logfc_vals < 0], probs = 0.25, na.rm = TRUE)
+          p75_pos <- quantile(logfc_vals[logfc_vals > 0], probs = 0.75, na.rm = TRUE)
+          limit_val <- max(abs(p25_neg), abs(p75_pos), na.rm = TRUE)
+          
+          if (!is.finite(limit_val) || limit_val == 0) {
+            limit_val <- max(abs(logfc_vals), na.rm = TRUE)
+          }
+          
+          color_limits <- c(-limit_val, limit_val)
+        } else {
+          color_limits <- c(-1, 1)
+        }
+        
+        # Color function (blue -> gray -> red)
+        col_fun <- colorRamp2(c(color_limits[1], 0, color_limits[2]), 
+                             c("#0000CC", "#BDBDBD", "#C62828"))
+        
+        # Calculate reasonable dimensions
+        n_kinases <- ncol(heatmap_matrix)
+        n_pathways <- nrow(heatmap_matrix)
+        
+        # Base width and height with reasonable limits
+        if (!is.null(w)){
+          w_adj <- max(20, max(8, n_kinases * 0.4))  # Max reasonable width
+        } else {
+          w_adj <- w
+        }
+        if (!is.null(h)){
+          h_adj <- max(14, max(4, n_pathways * 0.25 + 2))  # Extra space for row names
+        } else {
+          h_adj <- h
+        }
+        
+        
+        # Create heatmap
+        ht <- Heatmap(
+          heatmap_matrix,
+          name = "LogFC",
+          col = col_fun,
+          cluster_rows = TRUE,  # cluster pathways
+          cluster_columns = TRUE,  # Cluster kinases
+          show_row_names = TRUE,
+          show_column_names = TRUE,
+          column_title = paste("Kinase-Pathway Heatmap:", comparison, "(spec:", current_spec_cutoff, ")"),
+          column_title_gp = gpar(fontsize = 12, fontface = "bold"),
+          row_names_gp = gpar(fontsize = 6),  # Smaller font for long pathway names
+          column_names_gp = gpar(fontsize = 8),
+          row_names_max_width = unit(8, "cm"),  # More space for row names
+          rect_gp = gpar(col = "black", lwd = 0.5),
+          heatmap_legend_param = list(title = "LogFC", 
+                                     title_gp = gpar(fontsize = 10),
+                                     labels_gp = gpar(fontsize = 8))
+        )
+        
+        # Save individual heatmap
+        filename <- paste0(spec_save_folder, "/Kinase_Pathway_heatmap_", 
+                          gsub("[^A-Za-z0-9_-]", "_", comparison), ".png")
+        png(filename, 
+            width = w_adj, 
+            height = h_adj,
+            units = "cm",
+            res = 300)
+        draw(ht)
+        dev.off()
+        
+        cat("Saved heatmap:", filename, "\n")
+        
+      }, error = function(e) {
+        warning("Error processing ", comparison, " (spec_cutoff: ", current_spec_cutoff, "): ", e$message)
+      })
+    }
+    
+    # Create combined heatmaps for this spec_cutoff
+    if (length(heatmap_data_list) >= 2 && length(heatmap_data_list) <= 4) {
+      
+      create_combined_heatmap(heatmap_data_list = heatmap_data_list, w_combined = w_combined, h = h, 
+                              save_folder = spec_save_folder)
+      
+      # Create union combined heatmap for exactly 2 comparisons
+      if (length(heatmap_data_list) == 2) {
+        create_union_combined_heatmap(heatmap_data_list = heatmap_data_list, w_combined = w_combined, h = h, 
+                                     save_folder = spec_save_folder)
+      }
+      
+    } else if (length(heatmap_data_list) > 4) {
+      cat("Too many comparisons (", length(heatmap_data_list), ") for combined heatmap in spec_cutoff ", current_spec_cutoff, ". Maximum 4 allowed. Skipping combined heatmap.\n")
+    } else if (length(heatmap_data_list) == 1) {
+      cat("Only one comparison found for spec_cutoff ", current_spec_cutoff, ". Skipping combined heatmap.\n")
+    }
+    
+    cat("Heatmap generation completed for spec_cutoff:", current_spec_cutoff, ". Files saved in:", spec_save_folder, "\n")
+  }
+  
+  cat("All heatmap generation completed. Files saved in:", save_folder, "\n")
+}
+

@@ -7,9 +7,6 @@ editor_options:
 
 ```{r}
 library(tidyverse)
-library(PCSF)
-source("R/helper.R")
-source("R/kinograte_PG.R")
 
 load("data/ppi_network/ppi_network_human_v12.rda")
 # ppi_networkv12_kin <- load("data/ppi_networkv12_kin.rda")
@@ -27,7 +24,7 @@ rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent"
 input_folder <- "uka/180377"
 
 uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows() %>% dplyr::rename(Sgroup_contrast = SG_contrast)
-unique(uka$SG_contrast)
+unique(uka$Sgroup_contrast)
 
 my_contrasts <- c('C_SG2 vs SG1', "T05_SG2 vs SG1")
 
@@ -55,24 +52,24 @@ uka_syms <- rlang::syms(c("uka"))
 # Run kinase
 
 ```{r}
-source("R/helper_only_kinase_paralell.R")
+source("R/helper.R")
 source("R/kinograte_PG_only_kinase.R")
 source("R/kinograte_PG_core.R")
 source("R/network_enrichment_and_vis.R")
-library(ComplexHeatmap)
-library(circlize)
 
-
+# Name of your results folder
 result_path <- paste0("results3/",  sub(".*\\/", "", input_folder))
 
+# make output folder
 if (!file.exists(result_path)) {
   dir.create(result_path, recursive = T)
 }
 
+# Parameter list - fill it
 params <- list(
-  spec_cutoff = 0.7, # sensitivity score
+  spec_cutoffs = c(0.7, 0.5), # specificity score, possibly input multiple
   respath = result_path,
-  perc_cutoffs = c(0.01), # c(0.9, 0.7, 0.5, 0.3)
+  perc_cutoff = 0.01, # single value instead of vector
   rank_uka_abs = T,
   b = 2,
   cs = F,
@@ -81,6 +78,7 @@ params <- list(
   art_lfc = NULL
 )
 
+# run this to create networks and pathway csvs
 for (uka_sym in uka_syms) {
   params_run <- capture_params(
     !!!params,
@@ -93,7 +91,7 @@ for (uka_sym in uka_syms) {
 
 
 
-
+# Plot pathway heatmaps from pathway csvs created above
 plot_kinase_pathway_heatmaps(paste0(result_path, '/180377_Network_pws'))
 
 
@@ -112,7 +110,6 @@ plot_kinase_pathway_heatmaps(paste0(result_path, '/180377_Network_pws'))
 # Run kinase + sensitivity
 
 ```{r}
-source("R/helper.R")
 source("R/kinograte_PG.R")
 source("R/network_enrichment_and_vis.R")
 
@@ -125,10 +122,10 @@ if (!file.exists(result_path)) {
 }
 
 params <- list(
-  spec_cutoff = 1,
+  spec_cutoffs = c(1),
   control = "RL",
   respath = result_path,
-  perc_cutoffs = c(0.7), # c(0.9, 0.7, 0.5, 0.3)
+  perc_cutoff = 0.7, # single value instead of vector
   rank_uka_abs = T,
   b = 2,
   cs = F,

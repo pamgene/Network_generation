@@ -1,4 +1,3 @@
-library(kinograte)
 library(visNetwork)
 library(igraph)
 library(httr)
@@ -110,7 +109,7 @@ filter_for_core_network <- function(g) {
 
 
 # compute path statistics between kinases and targets
-compute_path_stats_kin_tar <- function(nodes, edges, missing_nodes, a = 1, relative_to, res.path, condition, perc_cutoff) {
+compute_path_stats_kin_tar <- function(nodes, edges, missing_nodes, a = 1, relative_to, res.path, condition, spec_cutoff) {
   # Check if edges has at least two columns
   if (is.null(edges) || !is.data.frame(edges) || ncol(edges) < 2) {
     message("make_network_stats: edges data frame does not have at least two columns, skipping.")
@@ -129,7 +128,7 @@ compute_path_stats_kin_tar <- function(nodes, edges, missing_nodes, a = 1, relat
   g <- graph_from_data_frame(edges, directed = F, vertices = nodes)
   g_core <- filter_for_core_network(g)$graph
 
-  save_network_plot <- function(g, maintitle, res.path, condition, perc_cutoff){
+  save_network_plot <- function(g, maintitle, res.path, condition, spec_cutoff){
     nodes <- igraph::as_data_frame(g, what = "vertices") %>% dplyr::rename("Protein" = 'name')
     # Add degree column to nodes
     nodes$degree <- igraph::degree(g)
@@ -144,7 +143,7 @@ compute_path_stats_kin_tar <- function(nodes, edges, missing_nodes, a = 1, relat
     }
 
     # Save with error handling to prevent HTML widget issues
-    html_file <- paste0(res.path, "/", maintitle, "_p", perc_cutoff, ".html")
+    html_file <- paste0(res.path, "/", maintitle, "_spec", spec_cutoff, ".html")
     tryCatch({
       visSave(mynet, html_file, selfcontained = TRUE, background = "white")
     }, error = function(e) {
@@ -158,8 +157,8 @@ compute_path_stats_kin_tar <- function(nodes, edges, missing_nodes, a = 1, relat
     })
   }
 
-  # save_network_plot(g, maintitle = paste0("Full network - ", condition), res.path, condition, perc_cutoff)
-  # save_network_plot(g_core, maintitle = paste0(condition, "_core network"), res.path, condition, perc_cutoff)
+  # save_network_plot(g, maintitle = paste0("Full network - ", condition), res.path, condition, spec_cutoff)
+  # save_network_plot(g_core, maintitle = paste0(condition, "_core network"), res.path, condition, spec_cutoff)
 
 
   # --- Metric 1: median path between kinase and target nodes ---
@@ -284,9 +283,9 @@ compute_avg_sens_clustering <- function(g, nodes_df = NULL) {
   }
 }
 
-compute_network_metrics <- function(g, nodes, edges, missing_nodes, relative_to, res.path = NULL, condition = NULL, perc_cutoff = NULL) {
+compute_network_metrics <- function(g, nodes, edges, missing_nodes, relative_to, res.path = NULL, condition = NULL, spec_cutoff = NULL) {
   path_stats <- compute_path_stats_kin_tar(nodes = nodes, edges = edges, missing_nodes = missing_nodes, relative_to = relative_to, 
-                                          res.path = res.path, condition = condition, perc_cutoff = perc_cutoff)
+                                          res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
   avg_sens_clustering <- compute_avg_sens_clustering(g, nodes_df = nodes)
   c(
     path_stats,
@@ -301,7 +300,7 @@ compute_network_metrics <- function(g, nodes, edges, missing_nodes, relative_to,
 }
 
 compute_network_metrics_kinase <- function(nodes, edges, missing_nodes, relative_to,
-                               res.path, condition, perc_cutoff){
+                               res.path, condition, spec_cutoff){
   
   g <- graph_from_data_frame(edges, directed = F, vertices = nodes)
   
@@ -354,17 +353,17 @@ compute_network_metrics_kinase <- function(nodes, edges, missing_nodes, relative
 }
 
 # Helper: plot histogram of random metrics with observed value
-plot_network_metric_hist <- function(metric_name, random_vals, obs_val, res.path, cell, perc_cutoff) {
+plot_network_metric_hist <- function(metric_name, random_vals, obs_val, res.path, cell, spec_cutoff) {
   dir.create(file.path(res.path, "Network_metrics_plots"), showWarnings = FALSE, recursive = TRUE)
   df <- data.frame(value = random_vals)
   p <- ggplot(df, aes(x = value)) +
     geom_histogram(bins = 30, fill = "#BDBDBD", color = "black") +
     geom_vline(xintercept = obs_val, color = "red", linetype = "dashed", linewidth = 1) +
-    labs(title = paste0(metric_name, " (", cell, ", perc=", perc_cutoff, ")"),
+    labs(title = paste0(metric_name, " (", cell, ", spec=", spec_cutoff, ")"),
          x = metric_name, y = "Frequency") +
     theme_bw()
   fname <- file.path(res.path, "Network_metrics_plots",
-                     paste0("hist_", metric_name, "_", cell, "_p", perc_cutoff, ".png"))
+                     paste0("hist_", metric_name, "_", cell, "_spec", spec_cutoff, ".png"))
   ggsave(fname, p, width = 6, height = 4)
 }
 
@@ -380,7 +379,7 @@ make_ukadb_net_pws <- function(ukadb, ppi_network, slk, res.path, b = 2, highlig
                                    type = "Kinase")
   
   kinograte_res <- kinograte_pg_pcsf(df = ukadb_to_kinograte, ppi_network = ppi_network, 
-                                     perc_cutoff = 0,
+                                     spec_cutoff = 0,
                                      res.path = res.path, condition = "UKAdb",
                                      cluster = T, b = b, write = T)
   nodes2pw <- kinograte_res$nodes %>%
@@ -406,12 +405,19 @@ make_ukadb_net_pws <- function(ukadb, ppi_network, slk, res.path, b = 2, highlig
   
 }
 
-make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path, condition = NULL, 
+make_network_and_stats <- function(uka, sens, art_nodes = NULL, art_lfc = NULL, spec_cutoff, res.path, condition = NULL, 
                                    write = F, ppi_network, relative_to, b,
                                    wp_ontology_names = NULL, highlight_degree = 5) {
   # Makes a network from kinase and sensitivity data.
   # Then computes network statistics.
   # if write = T, enrich network with pathways and plot the graph with the pathways.
+  
+  # 0. Artificial nodes
+  if (!is.null(art_nodes)){
+    art_df <- data.frame(name = art_nodes, prize = 1, type = "Artificial", LogFC = art_lfc)
+    uka <- bind_rows(uka, art_df)
+  }
+  
   # 1. combine uka and sens for the network 
   combined_df <- bind_rows(list(Sensitivity = sens, Kinase = uka), .id = "type") %>% 
     dplyr::group_by(name) %>%
@@ -429,7 +435,7 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path
   print(sumdf) 
   # 2. Make network
   kinograte_res <- kinograte_pg_pcsf(df = combined_df, ppi_network = ppi_network, 
-                                perc_cutoff = perc_cutoff,
+                                spec_cutoff = spec_cutoff,
                                 res.path = res.path, condition = condition,
                                 cluster = T, b = b, write = write)
   
@@ -437,15 +443,15 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path
   if (!is.null(kinograte_res$network)) {
     g <- kinograte_res$network
     metrics <- compute_network_metrics(g, kinograte_res$nodes, kinograte_res$edges, kinograte_res$missing_nodes, relative_to = relative_to,
-                                       res.path = res.path, condition = condition, perc_cutoff = perc_cutoff)
+                                       res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
     
     
     # 4. Enrich network with pathways, then network with pathways
     if (write == T){
-      enrich_file <- paste0(res.path, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
+      enrich_file <- paste0(res.path, "/pathways_", condition, "_spec", spec_cutoff, ".csv")
       if (!file.exists(enrich_file)) {
         pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
-                            perc_cutoff = perc_cutoff, folder = res.path, condition = condition,
+                            spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
                             database = c("WikiPathways_2024_Human"), wp_ontology_names = wp_ontology_names)
       } else {
         pws <- readr::read_csv(enrich_file, show_col_types = FALSE)
@@ -459,7 +465,7 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path
         group_by(Protein) %>%
         summarize(pathway = paste0(Pathway, collapse = ","))
       
-      write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_p", sub(".*0\\.", "", perc_cutoff), "_with_pathways.csv"))
+      write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_spec", spec_cutoff, "_with_pathways.csv"))
       
 
       nodes2pw <- kinograte_res$nodes  %>%
@@ -473,7 +479,7 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path
       mynet
 
       # Save with error handling to prevent HTML widget issues
-      html_file <- paste0(res.path, "/", condition, "_network_p", perc_cutoff, "_pws.html")
+      html_file <- paste0(res.path, "/", condition, "_network_spec", spec_cutoff, "_pws.html")
       tryCatch({
         visSave(mynet, html_file, selfcontained = TRUE, background = "white")
       }, error = function(e) {
@@ -494,54 +500,8 @@ make_network_and_stats <- function(uka, sens, perc_cutoff, spec_cutoff, res.path
 
 
 
-# compute_med_path_kin_tar <- function(nodes, edges, perc_cutoff, res.path, condition = NULL, write = FALSE){
-#   # Compute Sensitivity node interactors ratio and network stats, return as data.frame
-#   # mean_n_interactor_ratio <- get_sensitivity_interactors(
-#   #   kinograte_nodes = nodes, 
-#   #   ppi_network = ppi_networkv12, 
-#   #   res.path = res.path, 
-#   #   perc_cutoff = perc_cutoff,
-#   #   condition = condition
-#   # )
-#   # Nodes that were input to the network but were dropped are also needed
 
-#   path_stats <- compute_path_stats_kin_tar(nodes, edges, missing_nodes, perc_cutoff, res.path, condition)
-#   rel_med_path_kinase_target <- path_stats$rel_med_path_kinase_target
-#   rel_med_path_all_nodes <- path_stats$rel_med_path_all_nodes
-#   rel_med_path_kinase_target_vs_all_nodes <- path_stats$rel_med_path_kinase_target_vs_all_nodes
-#   n_nodes <- path_stats$n_nodes
-
-#   stats <- data.frame(
-#     condition = condition,
-#     Percentile.cutoff = perc_cutoff,
-#     n_nodes = n_nodes,
-#     n_kin = nrow(nodes %>% filter(type == "Kinase")),
-#     n_target = nrow(nodes %>% filter(type == "Sensitivity")),
-#     n_double = nrow(nodes %>% filter(type == "Sensitivity-Kinase")),
-#     Metric = c("Relative med path kinase-target", "Relative med path all nodes", "Kinase-target / all nodes path ratio"), 
-#     value = c(rel_med_path_kinase_target, rel_med_path_all_nodes, rel_med_path_kinase_target_vs_all_nodes)
-#   )
-#   if (write){
-#     write_csv(stats, paste0(res.path, "/stats_", condition, ".csv")) 
-#   }
-#   # Metric = c("Relative med path kinase-target", "Relative med path all nodes",
-#   #            "n overlaps / n targets", "mean of n interactors / refnet interactors"), 
-#   # value = c(rel_med_path_kinase_target, rel_med_path_all_nodes, 
-#   #           rel_overlap_kin_sens, mean_n_interactor_ratio)
-#   return(list(
-#     rel_med_path_kinase_target = rel_med_path_kinase_target,
-#     rel_med_path_all_nodes = rel_med_path_all_nodes,
-#     rel_med_path_kinase_target_vs_all_nodes = rel_med_path_kinase_target_vs_all_nodes
-#   ))
-# }
-
-
-
-
-
-
-
-get_sensitivity_interactors <- function(kinograte_nodes, ppi_network, res.path, perc_cutoff, condition) {
+get_sensitivity_interactors <- function(kinograte_nodes, ppi_network, res.path, spec_cutoff, condition) {
   # Filter for Sensitivity or Sensitivity-Kinase nodes
   sens_nodes <- kinograte_nodes %>%
     dplyr::filter(type %in% c("Sensitivity", "Sensitivity-Kinase")) %>%
@@ -586,7 +546,7 @@ get_sensitivity_interactors <- function(kinograte_nodes, ppi_network, res.path, 
   # Save
   write_csv(
     result,
-    paste0(res.path, "/stats_interactors_of_sens_nodes_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
+    paste0(res.path, "/stats_interactors_of_sens_nodes_", condition, "_spec", spec_cutoff, ".csv")
   )
   
   return(result_med)

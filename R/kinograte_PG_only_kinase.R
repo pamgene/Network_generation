@@ -1,4 +1,3 @@
-library(kinograte)
 library(visNetwork)
 library(igraph)
 library(httr)
@@ -52,7 +51,7 @@ augment_by_threshold_steps <- function(pcsf_graph, full_graph, cost_threshold = 
 
 
 compute_network_metrics_kinase <- function(nodes, edges, missing_nodes, 
-                               res.path, condition, perc_cutoff){
+                               res.path, condition, spec_cutoff){
   
   g <- graph_from_data_frame(edges, directed = F, vertices = nodes)
   
@@ -90,23 +89,23 @@ compute_network_metrics_kinase <- function(nodes, edges, missing_nodes,
 }
 
 # Helper: plot histogram of random metrics with observed value
-plot_network_metric_hist <- function(metric_name, random_vals, obs_val, res.path, cell, perc_cutoff) {
+plot_network_metric_hist <- function(metric_name, random_vals, obs_val, res.path, cell, spec_cutoff) {
   dir.create(file.path(res.path, "Network_metrics_plots"), showWarnings = FALSE, recursive = TRUE)
   df <- data.frame(value = random_vals)
   p <- ggplot(df, aes(x = value)) +
     geom_histogram(bins = 30, fill = "#BDBDBD", color = "black") +
     geom_vline(xintercept = obs_val, color = "red", linetype = "dashed", linewidth = 1) +
-    labs(title = paste0(metric_name, " (", cell, ", perc=", perc_cutoff, ")"),
+    labs(title = paste0(metric_name, " (", cell, ", spec=", spec_cutoff, ")"),
          x = metric_name, y = "Frequency") +
     theme_bw()
   fname <- file.path(res.path, "Network_metrics_plots",
-                     paste0("hist_", metric_name, "_", cell, "_p", perc_cutoff, ".png"))
+                     paste0("hist_", metric_name, "_", cell, "_spec", spec_cutoff, ".png"))
   ggsave(fname, p, width = 6, height = 4)
 }
 
 
 
-make_network_and_stats <- function(uka, art_nodes = NULL, art_lfc = NULL, perc_cutoff, spec_cutoff, res.path, condition = NULL, write = F, 
+make_network_and_stats_kinase <- function(uka, art_nodes = NULL, art_lfc = NULL, spec_cutoff, res.path, condition = NULL, write = F, 
 ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
   # Makes a network then computes network statistics.
   # if write = T, enrich network with pathways and plot the graph with the pathways.
@@ -119,14 +118,14 @@ ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
   
   # 1. Make network
   kinograte_res <- kinograte_pg(df = uka, ppi_network = ppi_network, 
-                                perc_cutoff = perc_cutoff,
+                                spec_cutoff = spec_cutoff,
                                 res.path = res.path, condition = condition,
                                 cluster = T, b = b, write = write)
   
   
   g <- kinograte_res$network
   metrics <- compute_network_metrics_kinase(kinograte_res$nodes, kinograte_res$edges, kinograte_res$missing_nodes, 
-                                            res.path = res.path, condition = condition, perc_cutoff = perc_cutoff)
+                                            res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
   
   
   if (write == T){
@@ -136,13 +135,13 @@ ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
     nodes_clusters <- kinograte_res$wc_df %>% 
       group_by(cluster) %>%
       summarize(nodes = paste0(id, collapse = "; "))
-    write_csv(nodes_clusters, paste0(res.path, "/nodes_clusters_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+    write_csv(nodes_clusters, paste0(res.path, "/nodes_clusters_", condition, "_spec", spec_cutoff, ".csv"))
     
     # 4. Enrich network with pathways, then network with pathways
-    enrich_file <- paste0(res.path, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv")
+    enrich_file <- paste0(res.path, "/pathways_", condition, "_spec", spec_cutoff, ".csv")
     if (!file.exists(enrich_file)) {
       pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
-                                   perc_cutoff = perc_cutoff, folder = res.path, condition = condition,
+                                   spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
                                    database = c("Reactome_Pathways_2024"), wp_ontology_names = wp_ontology_names)
       # dbs: WikiPathways_2024_Human, KEGG_2021_Human, Reactome_Pathways_2024
     } else {
@@ -156,7 +155,7 @@ ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
       group_by(Protein) %>%
       summarize(pathway = paste0(Group_Pw, collapse = ","))
     
-    write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_p", sub(".*0\\.", "", perc_cutoff), "_with_pathways.csv"))
+    write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_spec", spec_cutoff, "_with_pathways.csv"))
     
     
     nodes2pw <- kinograte_res$nodes  %>%
@@ -185,7 +184,7 @@ ppi_network,  b, wp_ontology_names = NULL, highlight_degree = 5) {
         dir.create(output_dir, recursive = TRUE)
       }
       condition <- gsub(" ", "_", condition)
-      html_file <- file.path(output_dir, paste0(condition, "_p", perc_cutoff, ".html"))
+      html_file <- file.path(output_dir, paste0(condition, "_spec", spec_cutoff, ".html"))
       
       
       # Use htmlwidgets::saveWidget instead of visSave for more robust saving

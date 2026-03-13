@@ -1,6 +1,5 @@
 # Network enrichment and visualization
 
-library(kinograte)
 library(visNetwork)
 library(igraph)
 library(httr)
@@ -297,7 +296,7 @@ WHERE {
 }
 
 
-do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, condition = NULL,
+do_network_enrichment <- function(network, pval = 0.05, spec_cutoff, folder, condition = NULL,
                                   database, wp_ontology_names){
   enrichr_res <- network_enrichment_pg(network = network, database = database, wp_ontology_names = wp_ontology_names)
   enrichr_res_pw <- enrichr_res$pathways
@@ -333,7 +332,7 @@ do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, con
     enrichr_res_pw_filt <- add_reactome_hierarchy(pw_df = enrichr_res_pw_filt, rpws = rpws, rel = rpwrel)
   }
   write_csv(enrichr_res_pw_filt,
-            paste0(folder, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), "_all.csv"))
+            paste0(folder, "/pathways_", condition, "_spec", spec_cutoff, "_all.csv"))
   
   # For each Genes value, choose one pathway based on hierarchy_n
 
@@ -342,7 +341,7 @@ do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, con
     slice_min(order_by = hierarchy_n, with_ties = FALSE) %>%
     ungroup() 
   write_csv(enrichr_res_pw_filt_short,
-            paste0(folder, "/pathways_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+            paste0(folder, "/pathways_", condition, "_spec", spec_cutoff, ".csv"))
   
   return(enrichr_res_pw_filt_short)
   
@@ -387,14 +386,14 @@ do_network_enrichment <- function(network, pval = 0.05, perc_cutoff, folder, con
   # enrichr_res_pw_cleaned <- remove_subset_rows(enrichr_res_pw_short, "Genes")
   # 
   # write_csv(enrichr_res_pw_cleaned, 
-  #           paste0(folder, "/enrich_results_short_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+  #           paste0(folder, "/enrich_results_short_", condition, "_spec", spec_cutoff, ".csv"))
   # 
   # pw_summary <- enrichr_res_pw_cleaned %>% separate_longer_delim(pathways, " | ") %>%
   #   group_by(pathways) %>% summarize(n_clusters = n(),
   #                                    clusters = paste0(Genes, collapse = " | "))
   # 
   # write_csv(pw_summary, 
-  #           paste0(folder, "/enrich_results_per_pathway_", condition, "_p", sub(".*0\\.", "", perc_cutoff), ".csv"))
+  #           paste0(folder, "/enrich_results_per_pathway_", condition, "_spec", spec_cutoff, ".csv"))
   # return(pw_summary)
  
   
@@ -808,7 +807,7 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
 }
 
 
-plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoff, respath, perc_cutoffs,
+plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, respath, perc_cutoff,
                                rank_uka_abs = T, ppi_network = ppi_networkv12, b, cs,
                                wp_ontology_names = c("metabolic pathway", "signaling pathway", "signaling", "regulatory pathway"), 
                                highlight_degree) {
@@ -832,17 +831,17 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoff, resp
   uka_parsed <- clean_uka_to_kinograte(uka, cs = cs)
   conditions <- unique(uka_parsed$Sgroup_contrast)
   
-  for (perc_cutoff in perc_cutoffs) {
-    # Sequential loop over cells for this percentile cutoff
+  for (spec_cutoff in spec_cutoffs) {
+    # Sequential loop over cells for this spec cutoff
     temp_files <- c()
     for (condition in conditions) {
-      print(paste0("Constructing network for perc cutoff: ", perc_cutoff, " and condition: ", condition, "..."))
+      print(paste0("Constructing network for spec cutoff: ", spec_cutoff, " and condition: ", condition, "..."))
       # Take top hits for uka for observed score
       uka_filt <- uka_parsed %>%
         filter(Sgroup_contrast == condition) %>%
         uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff, cs = cs)
-      make_network_and_stats(
-        uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, perc_cutoff = perc_cutoff,
+      make_network_and_stats_kinase(
+        uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, 
         spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
         write = T, ppi_network = ppi_network,
         b = b, wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree
@@ -854,7 +853,7 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoff, resp
 
 
 plot_cell_networks <- function(uka, sens, del_cells = NULL, 
-                               control, spec_cutoff, zscore, best_drug_per_target = NULL, respath, perc_cutoffs, 
+                               control, spec_cutoffs, zscore, best_drug_per_target = NULL, respath, perc_cutoff, 
                                rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12, only_kinase = F, b, cs,
                                wp_ontology_names, highlight_degree) {
   
@@ -874,21 +873,23 @@ plot_cell_networks <- function(uka, sens, del_cells = NULL,
     })
   }
   
-  # Parse input data, filter for comparisons vs control
+  # Parse sensitivity data first (doesn't depend on spec_cutoff)
   sens_parsed <- clean_sens_to_kinograte(sens, control = control, zscore = zscore,
                                          best_drug_per_target = best_drug_per_target)
   
-  uka_parsed <- clean_uka_to_kinograte(uka, control = control, cs = cs)
-  # Find common cell lines in uka and sens
-  common_cells <- intersect(unique(uka_parsed$cell_line), unique(sens_parsed$cell_line))
-  if (!is.null(del_cells)){
-    common_cells <- common_cells[!common_cells %in% del_cells]   
-  }
-  # Sequential loop over percentile cutoffs
+  # Sequential loop over spec cutoffs
   loop_start <- Sys.time()
   logs <- character() # Collect log messages
-  for (perc_cutoff in perc_cutoffs) {
-    # Sequential loop over cells for this percentile cutoff
+  for (spec_cutoff in spec_cutoffs) {
+    # Parse UKA data for this spec_cutoff
+    uka_parsed <- clean_uka_to_kinograte1(uka, control = control, spec_cutoff = spec_cutoff, cs = cs)
+    # Find common cell lines in uka and sens
+    common_cells <- intersect(unique(uka_parsed$cell_line), unique(sens_parsed$cell_line))
+    if (!is.null(del_cells)){
+      common_cells <- common_cells[!common_cells %in% del_cells]   
+    }
+    
+    # Sequential loop over cells for this spec cutoff
     temp_files <- c()
     for (cell in common_cells) {
       # Take top hits for uka and sens for observed score
@@ -899,7 +900,7 @@ plot_cell_networks <- function(uka, sens, del_cells = NULL,
       
       obs_res <- make_network_and_stats(
         uka = uka_filt, sens = sens_filt,
-        perc_cutoff = perc_cutoff, spec_cutoff = spec_cutoff,
+        spec_cutoff = spec_cutoff,
         res.path = respath, condition = cell, write = T,
         ppi_network = ppi_network, relative_to = "n_nodes", only_kinase = only_kinase, b = b, 
         wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree
