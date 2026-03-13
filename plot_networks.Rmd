@@ -92,7 +92,7 @@ for (uka_sym in uka_syms) {
 
 
 # Plot pathway heatmaps from pathway csvs created above
-plot_kinase_pathway_heatmaps(paste0(result_path, '/180377_Network_pws'))
+plot_kinase_pathway_heatmaps(paste0(result_path, '/thrs_0.7-0.5_perc0.01_ppi_networkv12_ukaabs1_b2_cs0'))
 
 
 ```

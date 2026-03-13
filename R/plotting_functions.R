@@ -1063,8 +1063,10 @@ create_combined_heatmap <- function(heatmap_data_list, w_combined, h, save_folde
         comp_matrix_subset,
         name = "LogFC",
         col = col_fun,
-        cluster_rows = FALSE,  # Keep pathway order consistent
-        cluster_columns = TRUE,
+        cluster_rows = F,
+        cluster_columns = FALSE,  # Order columns by name instead
+        column_order = order(colnames(comp_matrix_subset)),
+        row_order = order(rownames(comp_matrix_subset)),    
         show_row_names = TRUE,
         show_column_names = TRUE,
         column_title = comp_name,
@@ -1207,11 +1209,13 @@ create_union_combined_heatmap <- function(heatmap_data_list, w_combined, h, save
       union_matrix,
       name = "LogFC",
       col = col_fun,
-      cluster_rows = FALSE,  # Keep pathway order consistent
-      cluster_columns = TRUE,
+      cluster_rows = FALSE,
+      cluster_columns = FALSE,  # Order columns by name instead
+      column_order = order(colnames(union_matrix)),
+      row_order = order(rownames(union_matrix)),
       show_row_names = TRUE,
       show_column_names = TRUE,
-      row_split = pathway_split,  # Split rows by pathway category
+      row_split = pathway_split,  # Split rows by pathway category and cluster within splits
       column_title = comp_name,
       column_title_gp = gpar(fontsize = 8, fontface = "bold"),
       row_names_gp = gpar(fontsize = 6),
