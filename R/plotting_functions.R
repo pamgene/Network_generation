@@ -1264,20 +1264,23 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
     dir.create(save_folder, recursive = TRUE)
   }
   
-  # Find all nodes files with pathways
-  nodes_pw_files <- list.files(result_folder, 
-                              pattern = "nodes_.*_with_pathways\\.csv$", 
+  # Find all pathways files (excluding *_all.csv files)
+  pathways_files <- list.files(result_folder, 
+                              pattern = "pathways_.*\\.csv$", 
                               full.names = TRUE, recursive = TRUE)
   
-  if (length(nodes_pw_files) == 0) {
-    stop("No nodes_*_with_pathways.csv files found in the specified folder")
+  # Exclude pathways_*_all.csv files
+  pathways_files <- pathways_files[!grepl("pathways_.*_all\\.csv$", pathways_files)]
+  
+  if (length(pathways_files) == 0) {
+    stop("No pathways_*.csv files found in the specified folder (excluding *_all.csv files)")
   }
   
   # Extract spec_cutoff and comparison names from filenames
   extract_file_info <- function(filepath) {
     basename_file <- basename(filepath)
-    # Remove nodes_ prefix and _with_pathways.csv suffix
-    full_comparison <- gsub("^nodes_(.*)_with_pathways\\.csv$", "\\1", basename_file)
+    # Remove pathways_ prefix and .csv suffix
+    full_comparison <- gsub("^pathways_(.*)\\.csv$", "\\1", basename_file)
     
     # Extract spec cutoff
     spec_match <- regmatches(full_comparison, regexpr("_spec[0-9.]+$", full_comparison))
@@ -1293,8 +1296,8 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
   }
   
   # Get file information for all files
-  file_info_list <- lapply(nodes_pw_files, extract_file_info)
-  names(file_info_list) <- nodes_pw_files
+  file_info_list <- lapply(pathways_files, extract_file_info)
+  names(file_info_list) <- pathways_files
   
   # Group files by spec_cutoff
   spec_cutoffs <- unique(sapply(file_info_list, function(x) x$spec_cutoff))
@@ -1332,25 +1335,26 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
       cat("Processing comparison:", comparison, "(spec_cutoff:", current_spec_cutoff, ")\n")
       
       # Find corresponding nodes file (without pathways)
-      nodes_file_pattern <- gsub("_with_pathways\\.csv$", "\\.csv", basename(pw_file))
-      nodes_file <- list.files(dirname(pw_file), 
-                              pattern = paste0("^", gsub("\\.", "\\\\.", nodes_file_pattern), "$"), 
-                              full.names = TRUE)[1]
+      # Convert from pathways_comparison_spec*.csv to nodes_comparison_spec*.csv
+      nodes_file_basename <- gsub("^pathways_", "nodes_", basename(pw_file))
+      nodes_file <- file.path(dirname(pw_file), nodes_file_basename)
       
-      if (is.na(nodes_file) || !file.exists(nodes_file)) {
+      if (!file.exists(nodes_file)) {
         warning("Could not find corresponding nodes file for: ", comparison, " (spec_cutoff: ", current_spec_cutoff, ")")
         next
       }
 
       # Read the files
       tryCatch({
-        nodes_pw <- read_csv(pw_file, show_col_types = FALSE)
+        pathways_data <- read_csv(pw_file, show_col_types = FALSE)
         nodes <- read_csv(nodes_file, show_col_types = FALSE)
         
-        # Separate longer delim for pathways and join with nodes data
-        nodes_pw_expanded <- nodes_pw %>%
-          separate_longer_delim(pathway, delim = ",") %>%
-          filter(!is.na(pathway), pathway != "") %>%
+        # Process pathways data: use Group_Pw and Genes columns, separate genes by ";"
+        nodes_pw_expanded <- pathways_data %>%
+          select(Group_Pw, Genes) %>%
+          separate_longer_delim(Genes, delim = ";") %>%
+          filter(!is.na(Genes), Genes != "", !is.na(Group_Pw), Group_Pw != "") %>%
+          rename(pathway = Group_Pw, Protein = Genes) %>%
           left_join(nodes %>% select(Protein, type, LogFC), 
                    by = "Protein") %>%
           filter(type %in% c("Kinase", "Artificial")) %>%
