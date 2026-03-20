@@ -167,9 +167,9 @@ visualize_network_pg <- function (
 }
 
 
-network_enrichment_pg <- function(network, database, wp_ontology_names, ...) {
+network_enrichment_pg <- function(network, database, ...) {
   
-  enrich_res <- suppressWarnings(enrichment_analysis_pg(subnet = network, database = database, wp_ontology_names = wp_ontology_names, ...))
+  enrich_res <- suppressWarnings(enrichment_analysis_pg(subnet = network, database = database, ...))
   
   enrich_res_df <- enrich_res$enrichment %>% 
     dplyr::mutate_at(c("P.value", "Adjusted.P.value", "Combined.Score"), as.numeric)
@@ -297,8 +297,9 @@ WHERE {
 
 
 do_network_enrichment <- function(network, pval = 0.05, spec_cutoff, folder, condition = NULL,
-                                  database, wp_ontology_names){
-  enrichr_res <- network_enrichment_pg(network = network, database = database, wp_ontology_names = wp_ontology_names)
+                                  database){
+  wp_ontology_names = c("metabolic pathway", "signaling pathway", "signaling", "regulatory pathway")
+  enrichr_res <- network_enrichment_pg(network = network, database = database)
   enrichr_res_pw <- enrichr_res$pathways
   
   enrichr_res_pw[,"P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"P.value"])), 3)
@@ -560,7 +561,7 @@ reactome_pw_hierarchy_vis <- function(pw_df, result_path){
 }
 
 
-enrichment_analysis_pg <-function(subnet, mode=NULL, gene_universe, database, wp_ontology_names){
+enrichment_analysis_pg <-function(subnet, mode=NULL, gene_universe, database){
   # Checking function arguments
   if (missing(subnet))
     stop("Need to specify the subnetwork obtained from the PCSF algorithm.")
@@ -634,7 +635,7 @@ enrichment_analysis_pg <-function(subnet, mode=NULL, gene_universe, database, wp
   enrichment_tab = do.call(rbind,lapply(c(1:length(enrichment_complete)),function(x) data.frame(Cluster=x,enrichment_complete[[x]])))
   
   if ("WikiPathways_2024_Human" %in% database) {
-    enrichment_tab <- filter_wps_by_ontology(pw_df = enrichment_tab, ontology_names = wp_ontology_names)
+    enrichment_tab <- filter_wps_by_ontology(pw_df = enrichment_tab)
   }
 
   more.than.two=which(sapply(enrichment_tab$Genes,function(x) length(unlist(strsplit(x,split=';')))>2))
@@ -809,7 +810,6 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
 
 plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, respath, perc_cutoff,
                                rank_uka_abs = T, ppi_network = ppi_networkv12, b, cs,
-                               wp_ontology_names = c("metabolic pathway", "signaling pathway", "signaling", "regulatory pathway"), 
                                highlight_degree) {
   # Ensure base output directory exists
   if (!dir.exists(respath)) {
@@ -844,7 +844,7 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, res
         uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, 
         spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
         write = T, ppi_network = ppi_network,
-        b = b, wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree
+        b = b, highlight_degree = highlight_degree
       )
     }
   }
@@ -854,8 +854,8 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, res
 
 plot_cell_networks <- function(uka, sens, del_cells = NULL, 
                                control, spec_cutoffs, zscore, best_drug_per_target = NULL, respath, perc_cutoff, 
-                               rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12, only_kinase = F, b, cs,
-                               wp_ontology_names, highlight_degree) {
+                               rank_uka_abs = T, balance = F, ppi_network = ppi_networkv12, b, cs,
+                               highlight_degree) {
   
   # Ensure base output directory exists
   if (!dir.exists(respath)) {
@@ -872,38 +872,37 @@ plot_cell_networks <- function(uka, sens, del_cells = NULL,
       }
     })
   }
-  
   # Parse sensitivity data first (doesn't depend on spec_cutoff)
-  sens_parsed <- clean_sens_to_kinograte(sens, control = control, zscore = zscore,
-                                         best_drug_per_target = best_drug_per_target)
+  sens_parsed <- clean_sens_to_kinograte(sens, control = control, zscore = F)
   
   # Sequential loop over spec cutoffs
   loop_start <- Sys.time()
   logs <- character() # Collect log messages
   for (spec_cutoff in spec_cutoffs) {
     # Parse UKA data for this spec_cutoff
-    uka_parsed <- clean_uka_to_kinograte1(uka, control = control, spec_cutoff = spec_cutoff, cs = cs)
+    uka_parsed <- clean_uka_to_kinograte1(uka, control = "RL", spec_cutoff = spec_cutoff, cs = cs)
     # Find common cell lines in uka and sens
     common_cells <- intersect(unique(uka_parsed$cell_line), unique(sens_parsed$cell_line))
     if (!is.null(del_cells)){
       common_cells <- common_cells[!common_cells %in% del_cells]   
     }
-    
+    print(paste0("Found cells: ", paste0(common_cells, collapse = ", ")))
     # Sequential loop over cells for this spec cutoff
     temp_files <- c()
     for (cell in common_cells) {
+      print(paste0("Working on: ", cell))
       # Take top hits for uka and sens for observed score
       uka_filt <- uka_parsed %>% filter(cell_line == cell) %>% uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff)
       sens_filt <- sens_parsed %>% filter(cell_line == cell) %>% sens_top(perc_cutoff, balance)
       # For random sampling, filter for cell
       uka_cell_all <- uka_parsed %>% filter(cell_line == cell)
       
-      obs_res <- make_network_and_stats(
+      make_network_and_stats(
         uka = uka_filt, sens = sens_filt,
         spec_cutoff = spec_cutoff,
         res.path = respath, condition = cell, write = T,
-        ppi_network = ppi_network, relative_to = "n_nodes", only_kinase = only_kinase, b = b, 
-        wp_ontology_names = wp_ontology_names, highlight_degree = highlight_degree
+        ppi_network = ppi_network, relative_to = "n_nodes", b = b, 
+        highlight_degree = highlight_degree
       )
     }
   }

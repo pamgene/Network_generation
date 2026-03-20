@@ -2,52 +2,10 @@
 
 This code is a copy from other projects and will be integrated to the main Rmd file later.
 
-# Run kinase + sensitivity
-
-```{r}
-source("R/kinograte_PG.R")
-source("R/network_enrichment_and_vis.R")
-
-sens_med <- read_csv("data/Sensitivity/sensitivity_median_stk_cells.csv")
-
-result_path <- "results/Network"
-
-if (!file.exists(result_path)) {
-  dir.create(result_path)
-}
-
-params <- list(
-  spec_cutoffs = c(1),
-  control = "RL",
-  respath = result_path,
-  perc_cutoff = 0.7, # single value instead of vector
-  rank_uka_abs = T,
-  b = 2,
-  cs = F,
-  wp_ontology_names = c("classic metabolic pathway", "signaling pathway", "regulatory pathway"),
-  highlight_degree = 5
-)
-
-
-
-for (uka_sym in uka_syms) {
-  params_run <- capture_params(
-    !!!params,
-    uka = !!uka_sym,
-    sens = !!rlang::sym("sens_med"),
-    ppi_network = !!rlang::sym('ppi_networkv12')
-  )
-  
-  do.call(plot_cell_networks, params_run)
-}
-
-
-```
-
 # Make network of 1 pw
 
 ```{r}
-source("R/kinograte_PG.R")
+source("R/kinograte_PG_only_kinase.R")
 source("R/kinograte_PG_core.R")
 source("R/network_enrichment_and_vis.R")
 

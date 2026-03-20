@@ -95,27 +95,20 @@ clean_uka_to_kinograte1 <- function(uka, control, spec_cutoff = 0, del_cell = NU
                          str_replace(contrast, paste0(" vs ", control), "")),
       MKS = ifelse(control_left, -.data[[stat_col]], .data[[stat_col]])
     ) %>%
-    dplyr::select('cell_line', 'Kinase Name', all_of(stat_col), all_of(finalscore_col)) %>%
-    dplyr::rename("uniprotname" = "Kinase Name", 'LogFC' = !!stat_col, 
+    dplyr::select('cell_line', 'Kinase Name', 'MKS', all_of(finalscore_col)) %>%
+    dplyr::rename("uniprotname" = "Kinase Name", 'LogFC' = "MKS", 
                   'fscore' = !!finalscore_col) %>%
     mutate(cell_line = gsub(cell_line, pattern = "-", replacement = "")) %>%
     distinct()
-  
   return(uka_clean)
 }
 
-clean_sens_to_kinograte <- function(sens, control, zscore = F, del_cell = NULL, best_drug_per_target){
+clean_sens_to_kinograte <- function(sens, control, zscore = F, del_cell = NULL){
   # if control is specified, it creates fold change.
   # if control is NULL, and zscore is True, creates z-score
   sens_filt <- sens %>% 
-    dplyr::rename('cell_line' = 'CELL_LINE_NAME',
-                  "uniprotname" = "TARGET_1")
+    dplyr::rename("uniprotname" = "TARGET_1")
 
-  # if best drug per target is given, keep only that drug per target (based on data availability and sd)
-  if (!is.null(best_drug_per_target)){
-    sens_filt <- sens_filt %>%
-      filter(DRUG_ID %in% best_drug_per_target$DRUG_ID) 
-  }
   # If control is given, make LogFC
   if (!is.null(control) & zscore == F){
     control_df <- sens_filt %>% filter(cell_line == control)

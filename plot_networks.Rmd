@@ -21,10 +21,15 @@ rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent"
 
 ```{r}
 
-input_folder <- "uka/180377"
+input_folder <- "uka/GDS"
 
-uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows() %>% dplyr::rename(Sgroup_contrast = SG_contrast)
+uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows() 
+
+# Clean UKA
+# uka <- uka %>% dplyr::rename(Sgroup_contrast = SG_contrast)
 unique(uka$Sgroup_contrast)
+
+uka$Sgroup_contrast <- sub("^_", "", uka$Sgroup_contrast)
 
 my_contrasts <- c('C_SG2 vs SG1', "T05_SG2 vs SG1")
 
@@ -42,6 +47,9 @@ uka <- uka %>%
                                            from = from_vals,
                                            to = to_vals))
 
+
+
+# Make UKA syms vector
 uka_syms <- rlang::syms(c("uka")) 
 
 
@@ -53,7 +61,7 @@ uka_syms <- rlang::syms(c("uka"))
 
 ```{r}
 source("R/helper.R")
-source("R/kinograte_PG_only_kinase.R")
+source("R/kinograte_PG.R")
 source("R/kinograte_PG_core.R")
 source("R/network_enrichment_and_vis.R")
 
@@ -98,8 +106,66 @@ plot_kinase_pathway_heatmaps(paste0(result_path, '/thrs_0.7-0.5_perc0.01_ppi_net
 ```
 
 
+# make data input to CausalPath
+
+```{r}
+
+input_to_cp <- uka %>%
+  filter(`Mean Specificity Score` > 0.7) %>%
+  filter(Sgroup_contrast == "Basal") %>%
+  select(ID = `Kinase Name`, Basal = `Median Kinase Statistic`) %>%
+  mutate(Symbols = ID, Sites = "") 
+
+hist(input_to_cp$Basal)
+write_delim(input_to_cp, file.path(input_folder, "input_to_cp_basal.txt"), delim = '\t')
+  
+
+```
 
 
+# Run Golden network: Kinase + Sensitivity
+
+```{r}
+
+source("R/helper.R")
+source("R/kinograte_PG.R")
+source("R/kinograte_PG_core.R")
+source("R/network_enrichment_and_vis.R")
+
+sens <- read_csv("data/sensitivity_gds_median_stk_cells_vs_RL_lessna.csv")
+
+result_path <- paste0("results/",  sub(".*\\/", "", input_folder))
+
+if (!file.exists(result_path)) {
+  dir.create(result_path, recursive = T)
+}
+
+params <- list(
+  spec_cutoffs = c(0.01), # specificity score, possibly input multiple
+  respath = result_path,
+  control = NULL,
+  perc_cutoff = 0.7, # single value instead of vector
+  rank_uka_abs = F,
+  b = 2,
+  cs = T,
+  highlight_degree = 5
+)
+
+
+
+
+for (uka_sym in uka_syms) {
+  params_run <- capture_params(
+    !!!params,
+    uka = !!uka_sym,
+    sens = !!rlang::sym("sens"),
+    ppi_network = !!rlang::sym('ppi_networkv12')
+  )
+  
+  do.call(plot_cell_networks, params_run)
+}
+
+```
 
 
 

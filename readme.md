@@ -10,7 +10,8 @@ The project was developed based on [Kinograte](https://github.com/CogDisResLab/K
 See how STRING db was downloaded and filtered [here](https://github.com/pamgene/STRING_download).
 
 
-Steps to install PCSF
+
+**Steps to install PCSF:**
 
 ```
 install.packages("devtools")
