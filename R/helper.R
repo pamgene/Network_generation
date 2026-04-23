@@ -180,7 +180,7 @@ capture_params <- function(...) {
         paste0(
           if(!is.null(sens_name)) paste0(sens_name, "_") else "",
           "thrs_", paste0(params$spec_cutoffs, collapse = "-"),
-          if(is.null(sens_name)) paste0("_perc", params$perc_cutoff) else "",
+          if(!is.null(sens_name)) paste0("_perc", params$perc_cutoff) else "",
           "_", ppi_network_name,
           if("nperms_network" %in% names(params)) paste0("_nperms", params$nperms_network) else "",
           if("relative_to" %in% names(params)) paste0("_rel2", params$relative_to) else "",

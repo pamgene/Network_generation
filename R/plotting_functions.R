@@ -1413,7 +1413,7 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
         
         # Color function (blue -> gray -> red)
         col_fun <- colorRamp2(c(color_limits[1], 0, color_limits[2]), 
-                             c("#0000CC", "#BDBDBD", "#C62828"))
+                             c("#0000CC", "#e6e2e2", "#C62828"))
         
         # Calculate reasonable dimensions
         n_kinases <- ncol(heatmap_matrix)
@@ -1431,7 +1431,6 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
           h_adj <- h
         }
         
-        
         # Create heatmap
         ht <- Heatmap(
           heatmap_matrix,
@@ -1441,7 +1440,8 @@ plot_kinase_pathway_heatmaps <- function(result_folder, save_folder = NULL, w = 
           cluster_columns = TRUE,  # Cluster kinases
           show_row_names = TRUE,
           show_column_names = TRUE,
-          column_title = paste("Kinase-Pathway Heatmap:", comparison, "(spec:", current_spec_cutoff, ")"),
+          column_title = paste0("Kinase-Pathway Heatmap:\n", comparison, 
+                                "\nSpecificity cutoff: ", current_spec_cutoff),
           column_title_gp = gpar(fontsize = 12, fontface = "bold"),
           row_names_gp = gpar(fontsize = 6),  # Smaller font for long pathway names
           column_names_gp = gpar(fontsize = 8),

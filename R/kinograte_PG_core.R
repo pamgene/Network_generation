@@ -286,7 +286,6 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
     message("PCSF_rand_df error: ", e$message)
     return(NULL)
   })
-  
   # write_csv(subnet$edges, "results/pcsf_rand_equivalent/pcsf_rand_pg_output.csv")
   
   if (is.null(subnet)) {

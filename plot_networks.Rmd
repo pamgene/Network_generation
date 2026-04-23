@@ -21,24 +21,32 @@ rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent"
 
 ```{r}
 
-input_folder <- "uka/GDS"
+source("R/helper.R")
 
-uka <- list.files(input_folder, ".csv", recursive = T, full.names = T) %>% lapply(read_csv) %>% bind_rows() 
+input_folder <- "uka/GDSi"
+
+uka <- list.files(input_folder, ".csv", recursive = F, full.names = T) %>% lapply(read_csv, id = "path") %>% lapply(function(x) clean_tercen_columns(x)) %>% bind_rows()
+
+uka$path <- sub(".*NUDUL_(.*)\\.csv.*", "\\1", uka$path)
+
+uka$Sgroup_contrast <- paste0(uka$path, "_", uka$`Treatment time`)
+
+uka <- uka %>% filter(`Treatment time` %in% c(2, 4))
 
 # Clean UKA
 # uka <- uka %>% dplyr::rename(Sgroup_contrast = SG_contrast)
 unique(uka$Sgroup_contrast)
 
-uka$Sgroup_contrast <- sub("^_", "", uka$Sgroup_contrast)
+my_contrasts <- c('_RL vs NU-DUL-1', "_SU-DHL-16 vs RL", "_WSU-DLCL2 vs RL")
+my_contrasts <- c("_WSU-DLCL2 vs RL")
 
-my_contrasts <- c('C_SG2 vs SG1', "T05_SG2 vs SG1")
 
-uka <- uka %>% 
-  filter(Sgroup_contrast %in% my_contrasts) 
+uka <- uka %>% filter(Sgroup_contrast %in% my_contrasts)
+unique(uka$Sgroup_contrast)
 
 from_vals = unique(uka$Sgroup_contrast)
 from_vals
-to_vals <- c("Basal", "Activated")
+to_vals <- c("armA vs armB")
 from_vals
 to_vals
 
@@ -64,10 +72,11 @@ source("R/helper.R")
 source("R/kinograte_PG.R")
 source("R/kinograte_PG_core.R")
 source("R/network_enrichment_and_vis.R")
+source("R/plotting_functions.R")
 
 # Name of your results folder
-result_path <- paste0("results3/",  sub(".*\\/", "", input_folder))
-
+result_path <- paste0("results/",  sub(".*\\/", "", input_folder))
+result_path
 # make output folder
 if (!file.exists(result_path)) {
   dir.create(result_path, recursive = T)
@@ -75,12 +84,12 @@ if (!file.exists(result_path)) {
 
 # Parameter list - fill it
 params <- list(
-  spec_cutoffs = c(0.7, 0.5), # specificity score, possibly input multiple
+  spec_cutoffs = c(0.7), # specificity score, possibly input multiple
   respath = result_path,
   perc_cutoff = 0.01, # single value instead of vector
-  rank_uka_abs = T,
+  rank_uka_abs = F,
   b = 2,
-  cs = F,
+  cs = T,
   highlight_degree = 5,
   art_nodes = NULL, # c("BTK")
   art_lfc = NULL
@@ -100,7 +109,7 @@ for (uka_sym in uka_syms) {
 
 
 # Plot pathway heatmaps from pathway csvs created above
-plot_kinase_pathway_heatmaps(paste0(result_path, '/thrs_0.7-0.5_perc0.01_ppi_networkv12_ukaabs1_b2_cs0'))
+plot_kinase_pathway_heatmaps(paste0(result_path, "/thrs_0.7_perc0.01_ppi_networkv12_ukaabs1_b2_cs1"))
 
 
 ```
@@ -141,7 +150,7 @@ if (!file.exists(result_path)) {
 }
 
 params <- list(
-  spec_cutoffs = c(0.01), # specificity score, possibly input multiple
+  spec_cutoffs = c(0.6), # specificity score, possibly input multiple
   respath = result_path,
   control = NULL,
   perc_cutoff = 0.7, # single value instead of vector
@@ -150,9 +159,6 @@ params <- list(
   cs = T,
   highlight_degree = 5
 )
-
-
-
 
 for (uka_sym in uka_syms) {
   params_run <- capture_params(

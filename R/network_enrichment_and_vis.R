@@ -719,6 +719,7 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
       if(is.null(response_collection))
         next
       # Reorder the enrichment according to the "Adjusted P-value"
+      
       ordered_resp = data.frame(response_collection$`Term`, response_collection$`Adjusted P-value`, response_collection$`Combined Score`, response_collection$Database)
       ordered_resp = ordered_resp[order(ordered_resp[,2]),]
       ordered_resp[,2] = signif(as.numeric(as.character(ordered_resp[,2])), 3)
@@ -840,12 +841,15 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, res
       uka_filt <- uka_parsed %>%
         filter(Sgroup_contrast == condition) %>%
         uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff, cs = cs)
-      make_network_and_stats_kinase(
-        uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, 
-        spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
-        write = T, ppi_network = ppi_network,
-        b = b, highlight_degree = highlight_degree
-      )
+      result <- make_network_and_stats_kinase(
+            uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, 
+            spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
+            write = T, ppi_network = ppi_network,
+            b = b, highlight_degree = highlight_degree
+          )
+      
+      if (is.null(result)) next
+        
     }
   }
   

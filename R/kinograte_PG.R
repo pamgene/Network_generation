@@ -178,12 +178,23 @@ make_network_and_stats <- function(uka, sens, art_nodes = NULL, art_lfc = NULL, 
       
       nodes2pw <- kinograte_res$nodes  %>%
         left_join(prot2pw, by = "Protein")
+
+      # # this is to select proteins for AACR abstract, WSUDCL2 figure
+      # filtered_proteins <- c("PIK3CA", "MTOR", "AKT1", "RPS6KB1", "EIF2AK3", "EIF2AK1", "IFIT1B",
+      #                        "CSNK2A1", "PRKACA", "CSNK1E", "PLK1", "TTK",
+      #                        "FBXO43", "CAMK2A", "CAMK2KD", "PNCK", "ATF1", "RPS6KA5")
+      # # this is to select proteins for AACR abstract, NUDUL figure
+      # filtered_proteins <- c("CHEK1", "ATR", "ATM", "MAPK8", "MAPK9", "MAPK13", "MAPK3",
+      #                        "CDK2", "CDK4", "CDK6", "CDK3", "CDK1", "AURKA", "PLK3", "CDK7",
+      #                        "ORC2", "MAK", "MASTL", "VRK1")
+      # nodes2pw <- nodes2pw %>% filter(Protein %in% filtered_proteins)
+      
       
       mynet <- visualize_network_pg(nodes = nodes2pw,
                                     edges = kinograte_res$edges,
                                     maintitle = kinograte_res$maintitle,
                                     cluster_df = kinograte_res$wc_df, options_by = 'pathway',
-                                    highlight_degree = highlight_degree)
+                                    highlight_degree = 10)
       mynet
       
       # Save with error handling to prevent HTML widget issues
@@ -216,12 +227,22 @@ ppi_network,  b, highlight_degree = 5) {
   }
   
   # 1. Make network
-  kinograte_res <- kinograte_pg(df = uka, ppi_network = ppi_network, 
-                                spec_cutoff = spec_cutoff,
-                                res.path = res.path, condition = condition,
-                                cluster = T, b = b, write = write)
   
-  
+  kinograte_res <- tryCatch(
+    {
+      kinograte_pg(df = uka, ppi_network = ppi_network, 
+                   spec_cutoff = spec_cutoff,
+                   res.path = res.path, condition = condition,
+                   cluster = T, b = b, write = write)
+      
+    }, error = function(e) {
+      # Handle the error
+      cat("\nCan't generate network for ", condition, " with spec cutoff ", spec_cutoff, ": ", e$message, "\n")
+    return(NULL)
+    }
+  ) 
+  if (is.null(kinograte_res)) return(NULL)
+
   g <- kinograte_res$network
   metrics <- compute_network_metrics_kinase(kinograte_res$nodes, kinograte_res$edges, kinograte_res$missing_nodes, 
                                             res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
@@ -239,38 +260,55 @@ ppi_network,  b, highlight_degree = 5) {
     # 4. Enrich network with pathways, then network with pathways
     enrich_file <- paste0(res.path, "/pathways_", condition, "_spec", spec_cutoff, ".csv")
     if (!file.exists(enrich_file)) {
-      pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
-                                   spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
-                                   database = c("Reactome_Pathways_2024"))
+      pws <- tryCatch(
+        {
+          do_network_enrichment(kinograte_res$network, pval = 0.05,
+                                spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
+                                database = c("Reactome_Pathways_2024"))
+        }, error = function(e) {
+            # Handle the error
+            cat("\nCan't generate pathway enrichment for condition: ", condition, " and spec cutoff: ", spec_cutoff, "\n")
+        }
+        
+      )
       # dbs: WikiPathways_2024_Human, KEGG_2021_Human, Reactome_Pathways_2024
     } else {
       pws <- readr::read_csv(enrich_file, show_col_types = FALSE)
     }
-    prot2pw <-  pws %>%
-      dplyr::select(Group_Pw, Genes) %>%
-      separate_longer_delim(Genes, delim = ";") %>%
-      distinct() %>%
-      dplyr::rename("Protein" = "Genes") %>%
-      group_by(Protein) %>%
-      summarize(pathway = paste0(Group_Pw, collapse = ","))
     
-    write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_spec", spec_cutoff, "_with_pathways.csv"))
-    
-    
-    nodes2pw <- kinograte_res$nodes  %>%
-      left_join(prot2pw, by = "Protein")
+    if (!is.null(pws)){
+      prot2pw <-  pws %>%
+        dplyr::select(Group_Pw, Genes) %>%
+        separate_longer_delim(Genes, delim = ";") %>%
+        distinct() %>%
+        dplyr::rename("Protein" = "Genes") %>%
+        group_by(Protein) %>%
+        summarize(pathway = paste0(Group_Pw, collapse = ","))
+      
+      write_csv(prot2pw, paste0(res.path, "/nodes_", condition, "_spec", spec_cutoff, "_with_pathways.csv"))
+      
+      nodes2pw <- kinograte_res$nodes  %>%
+        left_join(prot2pw, by = "Protein")
+    }
     
     # Check if we have valid data before creating visualization
-    if (nrow(nodes2pw) == 0 || is.null(kinograte_res$edges) || nrow(kinograte_res$edges) == 0) {
-      warning(paste("No nodes or edges available for pathway visualization of", condition, "- skipping"))
-      mynet <- NULL
-    } else {
+    if (exists("nodes2pw") && nrow(nodes2pw) > 0){
+      # all data available
       mynet <- visualize_network_pg(nodes = nodes2pw,
                                     edges = kinograte_res$edges,
                                     maintitle = kinograte_res$maintitle,
                                     cluster_df = kinograte_res$wc_df, options_by = 'pathway',
                                     highlight_degree = highlight_degree)
-    }
+    } else {
+      # network available, pathways not 
+      mynet <- visualize_network_pg(nodes = kinograte_res$nodes,
+                                    edges = kinograte_res$edges,
+                                    maintitle = kinograte_res$maintitle,
+                                    cluster_df = kinograte_res$wc_df, options_by = 'group',
+                                    highlight_degree = highlight_degree)
+      
+    } 
+    
     mynet
     
     # Check if network object is valid before saving
@@ -292,7 +330,7 @@ ppi_network,  b, highlight_degree = 5) {
                                 file = html_file,
                                 selfcontained = TRUE,
                                 background = "white")
-        cat("Successfully saved:", html_file, "\n")
+        cat("\nSuccessfully saved:", html_file, "\n")
       }, error = function(e) {
         warning(paste("Failed to save HTML for", condition, "_pws:", e$message))
         # Try alternative method if htmlwidgets fails
