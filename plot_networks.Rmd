@@ -23,15 +23,29 @@ rpwrel <- read_delim("data/ReactomePathwaysRelation.txt", col_names = c("parent"
 
 source("R/helper.R")
 
-input_folder <- "uka/GDSi"
+input_folder <- "uka/190117_PERKs"
 
-uka <- list.files(input_folder, ".csv", recursive = F, full.names = T) %>% lapply(read_csv, id = "path") %>% lapply(function(x) clean_tercen_columns(x)) %>% bind_rows()
+csuka <- list.files(input_folder, "UKA", recursive = F, full.names = T) %>% lapply(read_csv, id = "path") %>% lapply(function(x) clean_tercen_columns(x)) %>% bind_rows()
+
+csuka$path <- sub(".*NUDUL_(.*)\\.csv.*", "\\1", csuka$path)
+
+csuka$Sgroup_contrast <- paste0(csuka$path, "_", csuka$`Treatment time`)
+
+csuka <- csuka %>% filter(`Treatment time` %in% c(2, 4))
+
+uka <- list.files(input_folder, "^UKA", recursive = F, full.names = T) %>% 
+  lapply(read_csv, id = "path") %>% 
+  lapply(function(x) clean_tercen_columns(x)) %>% bind_rows()
 
 uka$path <- sub(".*NUDUL_(.*)\\.csv.*", "\\1", uka$path)
+uka$TrTime = sub("_T.*", "\\1", uka$Sgroup_contrast)
 
-uka$Sgroup_contrast <- paste0(uka$path, "_", uka$`Treatment time`)
 
-uka <- uka %>% filter(`Treatment time` %in% c(2, 4))
+
+uka$Sgroup_contrast <- paste0(uka$path, "_", uka$TrTime)
+
+uka <- uka %>% filter(TrTime %in% c(2, 4))
+
 
 # Clean UKA
 # uka <- uka %>% dplyr::rename(Sgroup_contrast = SG_contrast)
@@ -58,14 +72,14 @@ uka <- uka %>%
 
 
 # Make UKA syms vector
-uka_syms <- rlang::syms(c("uka")) 
+uka_syms <- rlang::syms("uka") 
 
 
 ```
 
 
 
-# Run kinase
+# Run kinase network
 
 ```{r}
 source("R/helper.R")
@@ -84,13 +98,14 @@ if (!file.exists(result_path)) {
 
 # Parameter list - fill it
 params <- list(
-  spec_cutoffs = c(0.7), # specificity score, possibly input multiple
+  spec_cutoffs = c(1), # specificity score, possibly input multiple
   respath = result_path,
   perc_cutoff = 0.01, # single value instead of vector
-  rank_uka_abs = F,
+  rank_uka_abs = T,
   b = 2,
   cs = T,
   highlight_degree = 5,
+  min_n_hits = 3,
   art_nodes = NULL, # c("BTK")
   art_lfc = NULL
 )
@@ -107,9 +122,9 @@ for (uka_sym in uka_syms) {
 }
 
 
-
+result_path <- "results/190117_WilliamsClaire"
 # Plot pathway heatmaps from pathway csvs created above
-plot_kinase_pathway_heatmaps(paste0(result_path, "/thrs_0.7_perc0.01_ppi_networkv12_ukaabs1_b2_cs1"))
+plot_kinase_pathway_heatmaps(result_path)
 
 
 ```
@@ -156,7 +171,7 @@ params <- list(
   perc_cutoff = 0.7, # single value instead of vector
   rank_uka_abs = F,
   b = 2,
-  cs = T,
+  cs = F,
   highlight_degree = 5
 )
 
@@ -169,6 +184,142 @@ for (uka_sym in uka_syms) {
   )
   
   do.call(plot_cell_networks, params_run)
+}
+
+```
+
+# Run only-kinase-score in parallel
+Sequential Dataset Processing with Condition-Level Parallelization 
+## Setup
+
+```{r}
+# Set up parallel cluster for CONDITION-LEVEL parallelization
+# The make_golden_score function will use this cluster internally
+
+setup_condition_parallel <- function() {
+  # Clean up any existing clusters first
+  if (exists("cl") && !is.null(cl)) {
+    tryCatch(stopCluster(cl), error = function(e) NULL)
+  }
+  
+  # Set up parallel cluster with PCSF package initialization
+  n_cores <- max(1, parallel::detectCores() - 2)
+  cat("Setting up cluster with", n_cores, "cores for CONDITION-LEVEL parallelization...\n")
+  
+  cl <- tryCatch({
+    parallel::makeCluster(n_cores)
+  }, error = function(e) {
+    cat("Error creating cluster:", e$message, "\n")
+    stop("Failed to create parallel cluster")
+  })
+  
+  cat("Cluster created successfully. Initializing workers for condition processing...\n")
+  
+  # CRITICAL: Initialize PCSF in each worker (required for Windows C++ functions)
+  init_result <- tryCatch({
+    parallel::clusterEvalQ(cl, {
+      library(PCSF)
+      library(dplyr)
+      library(readr)
+      library(tidyr)
+      library(purrr)
+      library(rlang)
+      library(igraph)
+      library(data.table)
+      
+      # Verify PCSF is properly loaded
+      if (!exists("PCSF", mode = "function")) {
+        stop("Failed to load PCSF in worker")
+      }
+      
+      # Load network data and source files in each worker
+      load("data/ppi_network/ppi_network_human_v12.rda")
+      source("R/helper_only_kinase_paralell.R")
+      source("R/kinograte_PG_only_kinase.R")
+      
+      # Return success indicator
+      return("Worker initialized successfully for condition processing")
+    })
+  }, error = function(e) {
+    cat("Error initializing workers:", e$message, "\n")
+    stopCluster(cl)
+    stop("Failed to initialize workers")
+  })
+  
+  cat("Worker initialization results:\n")
+  print(init_result)
+  
+  registerDoParallel(cl)
+  cat("Parallel backend registered for condition-level parallelization.\n")
+  
+  return(cl)
+}
+
+# Set up the parallel cluster for condition processing
+cl <- setup_condition_parallel()
+
+```
+
+## Run
+Process datasets sequentially - the parallelization happens INSIDE make_golden_score
+```{r}
+# Use the parallel version of helper functions for condition-level parallelization
+source("R/helper_only_kinase_paralell.R")
+source("R/kinograte_PG_only_kinase.R")
+
+# APPROACH: Sequential datasets, parallel conditions within each dataset
+# This maximizes CPU utilization without increasing computational workload
+
+# Show how many conditions we have per dataset
+for (i in seq_along(uka_syms)) {
+  uka_data <- eval(uka_syms[[i]])
+  conditions <- unique(uka_data$Sample)
+  print(conditions)
+  cat("Dataset", i, "(", rlang::as_string(uka_syms[[i]]), "):", length(conditions), "conditions\n")
+}
+
+
+for (uka_sym in uka_syms) {
+  cat("\n=== Processing dataset:", rlang::as_string(uka_sym), "===\n")
+  
+  result <- tryCatch({
+    # Use capture_params exactly like the original sequential version
+    params_run <- capture_params(
+      !!!params,
+      cs = if (grepl("uka_cs", uka_sym)) T else F,
+      uka = !!uka_sym,
+      ppi_network = !!rlang::sym("ppi_networkv12")
+    )
+    
+    # The parallel version of make_golden_score will automatically:
+    # 1. Process conditions in parallel (using the cluster we set up)
+    # 2. Use parallel_conditions = TRUE by default
+    # 3. Maximize CPU utilization across all available cores
+    do.call(make_golden_score, params_run)
+    
+  }, error = function(e) {
+    cat("ERROR processing dataset:", e$message, "\n")
+    return(NULL)
+  })
+  
+  if (!is.null(result)) {
+    cat("✓ Completed dataset:", rlang::as_string(uka_sym), "\n")
+    if (!is.null(result$results)) {
+      cat("  Generated", nrow(result$results), "result rows\n")
+    }
+  } else {
+    cat("✗ Failed dataset:", rlang::as_string(uka_sym), "\n")
+  }
+}
+
+cat("\nCONDITION-LEVEL PARALLELIZATION COMPLETED!\n")
+
+
+# Clean up the parallel cluster
+
+if (exists("cl") && !is.null(cl)) {
+  stopCluster(cl)
+  cat("Parallel cluster stopped successfully.\n")
 }
 
 ```

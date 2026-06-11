@@ -344,7 +344,7 @@ kinograte_pg_pcsf <- function(df, ppi_network, maintitle, n = 8, w = 10, r = 0.1
     as.data.frame() %>% 
     dplyr::select(-any_of(c('title')))
   
-  nodes_to_write <- kinograte_nodes %>% select(-prize)
+  nodes_to_write <- kinograte_nodes
   
   if (write) {
     readr::write_csv(
@@ -474,7 +474,7 @@ kinograte_pg <- function (df, ppi_network, maintitle, n = 8, w = 10, r = 0.1, b 
   kinograte_nodes <- nodes %>% as.data.frame() %>% 
     dplyr::select(-any_of(c('title')))
   
-  nodes_to_write <- kinograte_nodes %>% select(-prize)
+  nodes_to_write <- kinograte_nodes
   
   if (write) {
     readr::write_csv(

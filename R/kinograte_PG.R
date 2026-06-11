@@ -148,7 +148,7 @@ make_network_and_stats <- function(uka, sens, art_nodes = NULL, art_lfc = NULL, 
     #                                    res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
     
     
-    # 4. Enrich network with pathways, then network with pathways
+    # 4. Enrich network with pathways
     if (write == T){
       
       nodes_clusters <- kinograte_res$wc_df %>% 
@@ -160,7 +160,8 @@ make_network_and_stats <- function(uka, sens, art_nodes = NULL, art_lfc = NULL, 
       if (!file.exists(enrich_file)) {
         pws <- do_network_enrichment(kinograte_res$network, pval = 0.05,
                                      spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
-                                     database = c("Reactome_Pathways_2024"))
+                                     database = c("Reactome_Pathways_2024"), min_n_hits = min_n_hits,
+                                     nodes = kinograte_res$nodes)
       } else {
         pws <- readr::read_csv(enrich_file, show_col_types = FALSE)
       }
@@ -214,9 +215,9 @@ make_network_and_stats <- function(uka, sens, art_nodes = NULL, art_lfc = NULL, 
   }
 }
 
-make_network_and_stats_kinase <- function(uka, art_nodes = NULL, art_lfc = NULL, spec_cutoff, 
-                                          res.path, condition = NULL, write = F, 
-ppi_network,  b, highlight_degree = 5) {
+make_network_and_stats_kinase <- function(uka, art_nodes = NULL, art_lfc = NULL, spec_cutoff,
+                                          res.path, condition = NULL, write = F,
+ppi_network,  b, highlight_degree = 5, min_n_hits = 2) {
   # Makes a network then computes network statistics.
   # if write = T, enrich network with pathways and plot the graph with the pathways.
   
@@ -226,25 +227,43 @@ ppi_network,  b, highlight_degree = 5) {
     uka <- bind_rows(uka, art_df)
   }
   
-  # 1. Make network
-  
-  kinograte_res <- tryCatch(
-    {
-      kinograte_pg(df = uka, ppi_network = ppi_network, 
-                   spec_cutoff = spec_cutoff,
-                   res.path = res.path, condition = condition,
-                   cluster = T, b = b, write = write)
-      
-    }, error = function(e) {
-      # Handle the error
-      cat("\nCan't generate network for ", condition, " with spec cutoff ", spec_cutoff, ": ", e$message, "\n")
-    return(NULL)
+  # 1. Make network, or load from disk if already done
+  nodes_file <- paste0(res.path, "/nodes_", condition, "_spec", spec_cutoff, ".csv")
+
+  edges_file <- paste0(res.path, "/edges_", condition, "_spec", spec_cutoff, ".csv")
+  wc_file    <- paste0(res.path, "/wc_",    condition, "_spec", spec_cutoff, ".csv")
+
+  if (file.exists(nodes_file) && file.exists(edges_file)) {
+    cat("\nNetwork already exists for ", condition, " spec ", spec_cutoff, ", loading from disk.\n")
+    nodes <- readr::read_csv(nodes_file, show_col_types = FALSE)
+    edges <- readr::read_csv(edges_file, show_col_types = FALSE)
+    wc_df <- if (file.exists(wc_file)) readr::read_csv(wc_file, show_col_types = FALSE) else NULL
+    missing_df <- {
+      mf <- paste0(res.path, "/missing_nodes_", condition, "_spec", spec_cutoff, ".csv")
+      if (file.exists(mf)) readr::read_csv(mf, show_col_types = FALSE) else NULL
     }
-  ) 
-  if (is.null(kinograte_res)) return(NULL)
+    maintitle <- paste0(condition, " - Network with specificity cutoff = ", spec_cutoff,
+                        ", Number of nodes = ", nrow(nodes))
+    subnet <- igraph::graph_from_data_frame(edges, directed = FALSE, vertices = data.frame(name = nodes$Protein))
+    kinograte_res <- list(network = subnet, nodes = nodes, edges = edges,
+                          missing = missing_df, wc_df = wc_df, maintitle = maintitle)
+  } else {
+    kinograte_res <- tryCatch(
+      {
+        kinograte_pg(df = uka, ppi_network = ppi_network,
+                     spec_cutoff = spec_cutoff,
+                     res.path = res.path, condition = condition,
+                     cluster = T, b = b, write = write)
+      }, error = function(e) {
+        cat("\nCan't generate network for ", condition, " with spec cutoff ", spec_cutoff, ": ", e$message, "\n")
+        return(NULL)
+      }
+    )
+    if (is.null(kinograte_res)) return(NULL)
+  }
 
   g <- kinograte_res$network
-  metrics <- compute_network_metrics_kinase(kinograte_res$nodes, kinograte_res$edges, kinograte_res$missing_nodes, 
+  metrics <- compute_network_metrics_kinase(kinograte_res$nodes, kinograte_res$edges, kinograte_res$missing_nodes,
                                             res.path = res.path, condition = condition, spec_cutoff = spec_cutoff)
   
   
@@ -252,10 +271,12 @@ ppi_network,  b, highlight_degree = 5) {
     
     # save node_cluster data
     
-    nodes_clusters <- kinograte_res$wc_df %>% 
-      group_by(cluster) %>%
-      summarize(nodes = paste0(id, collapse = "; "))
-    write_csv(nodes_clusters, paste0(res.path, "/nodes_clusters_", condition, "_spec", spec_cutoff, ".csv"))
+    if (!is.null(kinograte_res$wc_df)) {
+      nodes_clusters <- kinograte_res$wc_df %>%
+        group_by(cluster) %>%
+        summarize(nodes = paste0(id, collapse = "; "))
+      write_csv(nodes_clusters, paste0(res.path, "/nodes_clusters_", condition, "_spec", spec_cutoff, ".csv"))
+    }
     
     # 4. Enrich network with pathways, then network with pathways
     enrich_file <- paste0(res.path, "/pathways_", condition, "_spec", spec_cutoff, ".csv")
@@ -264,7 +285,8 @@ ppi_network,  b, highlight_degree = 5) {
         {
           do_network_enrichment(kinograte_res$network, pval = 0.05,
                                 spec_cutoff = spec_cutoff, folder = res.path, condition = condition,
-                                database = c("Reactome_Pathways_2024"))
+                                database = c("Reactome_Pathways_2024"), min_n_hits = min_n_hits,
+                                nodes = kinograte_res$nodes)
         }, error = function(e) {
             # Handle the error
             cat("\nCan't generate pathway enrichment for condition: ", condition, " and spec cutoff: ", spec_cutoff, "\n")
@@ -291,58 +313,56 @@ ppi_network,  b, highlight_degree = 5) {
         left_join(prot2pw, by = "Protein")
     }
     
-    # Check if we have valid data before creating visualization
-    if (exists("nodes2pw") && nrow(nodes2pw) > 0){
-      # all data available
-      mynet <- visualize_network_pg(nodes = nodes2pw,
-                                    edges = kinograte_res$edges,
-                                    maintitle = kinograte_res$maintitle,
-                                    cluster_df = kinograte_res$wc_df, options_by = 'pathway',
-                                    highlight_degree = highlight_degree)
-    } else {
-      # network available, pathways not 
-      mynet <- visualize_network_pg(nodes = kinograte_res$nodes,
-                                    edges = kinograte_res$edges,
-                                    maintitle = kinograte_res$maintitle,
-                                    cluster_df = kinograte_res$wc_df, options_by = 'group',
-                                    highlight_degree = highlight_degree)
-      
-    } 
-    
-    mynet
-    
-    # Check if network object is valid before saving
-    if (is.null(mynet) || !inherits(mynet, "visNetwork")) {
-      warning(paste("Invalid network object for", condition, "_pws - skipping HTML save"))
-    } else {
-      # Ensure output directory exists and use normalized path
-      output_dir <- normalizePath(res.path, mustWork = FALSE)
-      if (!dir.exists(output_dir)) {
-        dir.create(output_dir, recursive = TRUE)
+    # Skip visualization if HTML already exists
+    output_dir <- normalizePath(res.path, mustWork = FALSE)
+    condition_clean <- gsub(" ", "_", condition)
+    html_file <- file.path(output_dir, paste0(condition_clean, "_spec", spec_cutoff, ".html"))
+
+    if (!file.exists(html_file)) {
+      if (exists("nodes2pw") && nrow(nodes2pw) > 0){
+        # all data available
+        mynet <- visualize_network_pg(nodes = nodes2pw,
+                                      edges = kinograte_res$edges,
+                                      maintitle = kinograte_res$maintitle,
+                                      cluster_df = kinograte_res$wc_df, options_by = 'pathway',
+                                      highlight_degree = highlight_degree)
+      } else {
+        # network available, pathways not
+        mynet <- visualize_network_pg(nodes = kinograte_res$nodes,
+                                      edges = kinograte_res$edges,
+                                      maintitle = kinograte_res$maintitle,
+                                      cluster_df = kinograte_res$wc_df, options_by = 'group',
+                                      highlight_degree = highlight_degree)
       }
-      condition <- gsub(" ", "_", condition)
-      html_file <- file.path(output_dir, paste0(condition, "_spec", spec_cutoff, ".html"))
+
+      # Check if network object is valid before saving
+      if (is.null(mynet) || !inherits(mynet, "visNetwork")) {
+        warning(paste("Invalid network object for", condition, "_pws - skipping HTML save"))
+      } else {
+        if (!dir.exists(output_dir)) {
+          dir.create(output_dir, recursive = TRUE)
+        }
       
       
-      # Use htmlwidgets::saveWidget instead of visSave for more robust saving
-      tryCatch({
-        htmlwidgets::saveWidget(mynet, 
-                                file = html_file,
-                                selfcontained = TRUE,
-                                background = "white")
-        cat("\nSuccessfully saved:", html_file, "\n")
-      }, error = function(e) {
-        warning(paste("Failed to save HTML for", condition, "_pws:", e$message))
-        # Try alternative method if htmlwidgets fails
+        # Use htmlwidgets::saveWidget instead of visSave for more robust saving
         tryCatch({
-          visSave(mynet, html_file, selfcontained = F, background = "white")
-          cat("Saved with visSave (not self-contained):", html_file, "\n")
-        }, error = function(e2) {
-          warning(paste("Both saveWidget and visSave failed for", condition, "_pws:", e2$message))
+          htmlwidgets::saveWidget(mynet,
+                                  file = html_file,
+                                  selfcontained = TRUE,
+                                  background = "white")
+          cat("\nSuccessfully saved:", html_file, "\n")
+        }, error = function(e) {
+          warning(paste("Failed to save HTML for", condition, "_pws:", e$message))
+          tryCatch({
+            visSave(mynet, html_file, selfcontained = F, background = "white")
+            cat("Saved with visSave (not self-contained):", html_file, "\n")
+          }, error = function(e2) {
+            warning(paste("Both saveWidget and visSave failed for", condition, "_pws:", e2$message))
+          })
         })
-      })
-    }
-  }
+      } # end valid mynet
+    } # end !file.exists(html_file)
+  } # end write == T
   return(metrics)
   
 }

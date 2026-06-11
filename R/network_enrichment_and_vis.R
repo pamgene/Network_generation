@@ -170,7 +170,6 @@ visualize_network_pg <- function (
 network_enrichment_pg <- function(network, database, ...) {
   
   enrich_res <- suppressWarnings(enrichment_analysis_pg(subnet = network, database = database, ...))
-  
   enrich_res_df <- enrich_res$enrichment %>% 
     dplyr::mutate_at(c("P.value", "Adjusted.P.value", "Combined.Score"), as.numeric)
   
@@ -296,35 +295,96 @@ WHERE {
 }
 
 
+call_enr_simple <- function(genes, database = c("KEGG_2021_HUMAN", "Reactome_Pathways_2024",
+                                               "WikiPathways_2024_Human")) {
+  ENRICHR_ADDLIST <- 'http://amp.pharm.mssm.edu/Enrichr/addList'
+  ENRICHR_EXPORT  <- 'http://amp.pharm.mssm.edu/Enrichr/export'
+
+  request <- list(list = paste(genes, collapse = "\n"))
+  complete_request <- httr::POST(ENRICHR_ADDLIST, body = request)
+  output <- httr::content(complete_request, type = "text", encoding = "ISO-8859-1")
+  userListID <- strsplit(strsplit(output, "\n")[[1]][3], ": ")[[1]][2]
+
+  response_collection <- NULL
+  for (b in 1:length(database)) {
+    url <- paste0(ENRICHR_EXPORT, "?userListId=", userListID, "&backgroundType=", database[b])
+    response <- GET(url)
+    response <- httr::content(response, type = "text", encoding = "ISO-8859-1")
+    response <- strsplit(response, "\n")[[1]]
+    response <- lapply(response, function(x) strsplit(x, "\t")[[1]])
+    if (length(response) > 1 && length(response[[1]]) > 0) {
+      x <- length(response) - 1
+      m_resp <- as.data.frame(matrix(0, nrow = x, ncol = length(response[[1]])))
+      colnames(m_resp) <- response[[1]]
+      for (i in 1:x) {
+        if (length(response[[i+1]]) == length(response[[1]]))
+          m_resp[i,] <- response[[i+1]]
+      }
+      m_resp$Database <- database[b]
+      response_collection <- rbind(response_collection, m_resp)
+    }
+  }
+  return(response_collection)
+}
+
+
 do_network_enrichment <- function(network, pval = 0.05, spec_cutoff, folder, condition = NULL,
-                                  database){
+                                  database, per_cluster = F, min_n_hits = 2, nodes = NULL){
   wp_ontology_names = c("metabolic pathway", "signaling pathway", "signaling", "regulatory pathway")
-  enrichr_res <- network_enrichment_pg(network = network, database = database)
-  enrichr_res_pw <- enrichr_res$pathways
-  
-  enrichr_res_pw[,"P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"P.value"])), 3)
-  enrichr_res_pw[,"Adjusted.P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"Adjusted.P.value"])), 3)
-  
-  # Filter pathways: require minimum 3 overlapping genes across all clusters
-  # When a pathway appears in multiple clusters, sum the overlapping genes
-  enrichr_res_pw_filt <- enrichr_res_pw %>% 
-    group_by(Term) %>%
-    summarize(
-      n_hits = sum(as.numeric(str_extract(Overlap, "^[0-9]+")), na.rm = TRUE),
-      pathway_size = unique(as.numeric(str_extract(Overlap, "(?<=/)[0-9]+")))[1],
-      overlap = n_hits / pathway_size,
-      n_clusters = n(),
-      Genes = paste0(Genes, collapse = ";"),
-      Adjusted.P.value.mean = mean(Adjusted.P.value),
-      Combined.Score.mean = mean(Combined.Score),
-      Clusters = paste0(Cluster, collapse = ", "),
-      .groups = 'drop'
-    ) %>%
-    filter(n_hits > 2) %>%  # Remove pathways with ≤2 overlapping genes
-    dplyr::rename(Pathway = Term)
+
+  if (per_cluster) {
+    # --- per-cluster path via enrichment_analysis_pg ---
+    enrichr_res <- network_enrichment_pg(network = network, database = database)
+    enrichr_res_pw <- enrichr_res$pathways
+
+    enrichr_res_pw[,"P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"P.value"])), 3)
+    enrichr_res_pw[,"Adjusted.P.value"] = signif(as.numeric(as.character(enrichr_res_pw[,"Adjusted.P.value"])), 3)
+
+    # Filter pathways: require minimum 3 overlapping genes across all clusters
+    # When a pathway appears in multiple clusters, sum the overlapping genes
+    enrichr_res_pw_filt <- enrichr_res_pw %>%
+      group_by(Term) %>%
+      summarize(
+        n_hits = sum(as.numeric(str_extract(Overlap, "^[0-9]+")), na.rm = TRUE),
+        pathway_size = unique(as.numeric(str_extract(Overlap, "(?<=/)[0-9]+")))[1],
+        overlap = n_hits / pathway_size,
+        n_clusters = n(),
+        Genes = paste0(Genes, collapse = ";"),
+        Adjusted.P.value.mean = mean(Adjusted.P.value),
+        Combined.Score.mean = mean(Combined.Score),
+        Clusters = paste0(Cluster, collapse = ", "),
+        .groups = 'drop'
+      ) %>%
+      filter(n_hits >= min_n_hits) %>%
+      dplyr::rename(Pathway = Term)
+
+  } else {
+    # --- simple path: single Enrichr call on kinase nodes only ---
+    if (!is.null(nodes) && "type" %in% colnames(nodes)) {
+      genes <- nodes$Protein[nodes$type %in% c("Kinase", "Kinase-Peptide", "Protein-Kinase",
+                                                "Protein-Peptide-Kinase", "RNA-Kinase",
+                                                "RNA-Peptide-Kinase", "Sensitivity-Kinase")]
+    } else {
+      genes <- V(network)$name
+    }
+    raw <- call_enr_simple(genes = genes, database = database)
+    if (is.null(raw)) stop("Enrichr returned no results for network genes")
+
+    enrichr_res_pw_filt <- raw %>%
+      mutate(
+        n_hits       = as.numeric(str_extract(Overlap, "^[0-9]+")),
+        pathway_size = as.numeric(str_extract(Overlap, "(?<=/)[0-9]+")),
+        overlap      = n_hits / pathway_size,
+        Adjusted.P.value.mean = signif(as.numeric(as.character(`Adjusted P-value`)), 3),
+        Combined.Score.mean   = as.numeric(as.character(`Combined Score`)),
+        Clusters = "all"
+      ) %>%
+      filter(n_hits > min_n_hits) %>%
+      dplyr::rename(Pathway = Term)
+  }
   
   #filter for the top 75 percentile based on the Combined.Score column
-  if ("Combined.Score" %in% colnames(enrichr_res_pw)) {
+  if ("Combined.Score.mean" %in% colnames(enrichr_res_pw_filt)) {
     combined_score_threshold <- quantile(as.numeric(enrichr_res_pw_filt$Combined.Score.mean), 0.25, na.rm = TRUE)
     enrichr_res_pw_filt <- enrichr_res_pw_filt %>% dplyr::filter(as.numeric(Combined.Score.mean) >= combined_score_threshold)
   }
@@ -596,6 +656,7 @@ enrichment_analysis_pg <-function(subnet, mode=NULL, gene_universe, database){
       if(internet_connection){
         cat("  Enrichment is being performed by EnrichR (http://amp.pharm.mssm.edu/Enrichr) API ...\n")
         enrich = call_enr_pg(clusters = clusters, mode = 0, gene_universe = gene_universe, database = database)
+        
       }
       else{
         stop("There is no working Internet connection, perform your enrichment with topGO package with mode=1 by providing background gene list ...\n")
@@ -626,9 +687,9 @@ enrichment_analysis_pg <-function(subnet, mode=NULL, gene_universe, database){
   else{
     comps <-NULL
   }
+  
   enrichment = enrich[[1]]
   enrichment_complete = enrich[[2]]
-  
   novals<-which(unlist(sapply(enrich[[2]],function(x) is.null(dim(x)))))
   if(length(novals)>0)
     enrichment_complete <- enrichment_complete[-novals]
@@ -715,7 +776,6 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
           response_collection = rbind(response_collection, m_resp)
         }
       }
-      
       if(is.null(response_collection))
         next
       # Reorder the enrichment according to the "Adjusted P-value"
@@ -738,7 +798,6 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
         }
         enrich = paste0(enrich, "</tr> ")
       }
-      
       enrich = paste0(enrich, "</table> </body> </html>")
       
       # Attach the Enrichment Analysis for the current cluster
@@ -803,7 +862,6 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
     
   }
   
-  
   return (list(enrichment_result, enrichment_result_complete))
   
 }
@@ -811,7 +869,7 @@ call_enr_pg <- function(clusters, mode=0, gene_universe,
 
 plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, respath, perc_cutoff,
                                rank_uka_abs = T, ppi_network = ppi_networkv12, b, cs,
-                               highlight_degree) {
+                               highlight_degree, min_n_hits = 2) {
   # Ensure base output directory exists
   if (!dir.exists(respath)) {
     dir.create(respath, recursive = TRUE, showWarnings = FALSE)
@@ -841,11 +899,12 @@ plot_cell_networks_kinase <- function(uka, art_nodes, art_lfc, spec_cutoffs, res
       uka_filt <- uka_parsed %>%
         filter(Sgroup_contrast == condition) %>%
         uka_top(spec_cutoff = spec_cutoff, rank_uka_abs = rank_uka_abs, perc_cutoff = perc_cutoff, cs = cs)
+      
       result <- make_network_and_stats_kinase(
-            uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc, 
+            uka = uka_filt, art_nodes = art_nodes, art_lfc = art_lfc,
             spec_cutoff = spec_cutoff, res.path = respath, condition = condition,
             write = T, ppi_network = ppi_network,
-            b = b, highlight_degree = highlight_degree
+            b = b, highlight_degree = highlight_degree, min_n_hits = min_n_hits
           )
       
       if (is.null(result)) next
